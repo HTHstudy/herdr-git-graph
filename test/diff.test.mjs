@@ -10,7 +10,9 @@ test("rename commit diff has no hunks", async () => {
   const root = await fixture();
   const c4 = git(root, "rev-parse", "HEAD");
   const t = T({ root, commit: c4, parent: git(root, "rev-parse", "HEAD~1"), path: "dir with space/a renamed.txt", from: "a.txt" });
-  const d = parseDiff(run(root, diffArgs(t)));
+  const raw = run(root, diffArgs(t));
+  assert.ok(raw.includes("rename from a.txt"));
+  const d = parseDiff(raw);
   assert.equal(d.binary, false);
   assert.equal(d.hunks.length, 0);
 });
@@ -48,7 +50,9 @@ test("root commit parent uses empty tree", () => {
 
 test("sideBySide pairing", () => {
   const L = (kind, text) => ({ kind, old: null, new: null, text });
-  const rows = sideBySide([{ header: "@@", lines: [L("-", "a"), L("-", "b"), L("+", "c")] }]).filter((r) => r.left || r.right);
+  const all = sideBySide([{ header: "@@ -1 +1 @@", lines: [L("-", "a"), L("-", "b"), L("+", "c")] }]);
+  assert.deepEqual(all[0], { left: null, right: null, header: "@@ -1 +1 @@" });
+  const rows = all.filter((r) => r.left || r.right);
   assert.deepEqual(rows.map((r) => [r.left?.text, r.right?.text ?? null]), [["a", "c"], ["b", null]]);
 });
 
@@ -63,4 +67,14 @@ test("truncation", () => {
   const d = parseDiff(text);
   assert.equal(d.truncated, true);
   assert.equal(d.hunks[0].lines.length, MAX_DIFF_LINES);
+});
+
+test("multi-file diff: later headers skipped, binary after hunk detected", () => {
+  const two = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/y b/y\n--- a/y\n+++ b/y\n@@ -1 +1 @@\n-c\n+d\n";
+  const d = parseDiff(two);
+  assert.equal(d.hunks.length, 2);
+  assert.deepEqual(d.hunks.map((h) => h.lines.map((l) => l.text)), [["a", "b"], ["c", "d"]]);
+  const bin = parseDiff("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/z b/z\nBinary files a/z and b/z differ\n");
+  assert.equal(bin.binary, true);
+  assert.equal(bin.hunks[0].lines.length, 2);
 });

@@ -30,6 +30,7 @@ export function parseDiff(text) {
   let count = 0;
   for (const line of text.split("\n")) {
     if (truncated) break;
+    if (line.startsWith("diff --git")) { cur = null; continue; }
     const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (m) {
       cur = { header: line, lines: [] };
@@ -44,7 +45,6 @@ export function parseDiff(text) {
     }
     const c = line[0];
     if (c !== " " && c !== "+" && c !== "-") continue; // "\ No newline", blank trailer, next "diff --git"
-    if (line.startsWith("diff --git")) { cur = null; continue; }
     if (count >= MAX_DIFF_LINES) { truncated = true; break; }
     count++;
     const t = line.slice(1);
