@@ -17,7 +17,7 @@ export class Panel {
     this.repoOf = new Map();
     this.context = null; this.data = null; this.status = "loading"; this.error = null;
     this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0;
-    this.range = { start: 0, end: 0 };
+    this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0;
     this.seenChanged = shared("git-graph.changed")?.at ?? null;
     this.refresh(cx);
     cx.timer.every(10000, (cx) => this.refresh(cx));
@@ -40,28 +40,37 @@ export class Panel {
   watch(root, on, cx) {
     if (on || this.watched === root) return;
     this.watched = root;
-    const context = this.context;
+    // One live loop at most: resetting `watched` bumps the generation, so an older loop
+    // still parked in watchFolder ends when it wakes instead of running beside a new one.
+    const gen = ++this.watchGen, context = this.context;
     cx.spawn(async (cx) => {
       try {
-        while (this.watched === root && this.context === context) {
+        while (this.watchGen === gen) {
           await watchFolder(root);
-          if (this.watched === root && this.current(context)) this.refresh(cx);
+          if (this.watchGen === gen && this.current(context)) this.refresh(cx);
         }
-      } catch { if (this.watched === root) this.watched = null; }
+      } catch { if (this.watchGen === gen) this.unwatch(); }
     });
   }
 
+  unwatch() {
+    this.watched = null; this.watchGen++;
+  }
+
   refresh(cx) {
-    if (this.loading) { this.again = true; return; }
     const { cwd, on, key } = location(), context = key;
+    // Reset before the in-flight check: a focus change mid-load must not keep showing the old repo.
     if (context !== this.context) {
       this.context = context; this.data = null; this.status = "loading"; this.error = null;
-      this.chips = new Map(); this.graphW = graphWidth([]); this.watched = null; this.range = { start: 0, end: 0 };
+      this.chips = new Map(); this.graphW = graphWidth([]); this.range = { start: 0, end: 0 };
+      this.unwatch();
     }
+    if (this.loading) { this.again = true; return; }
     if (!cwd) { this.status = "nofolder"; return; }
     const known = this.repoOf.get(context), state = known ? this.repo(known) : null;
     const opts = { branches: state?.branches ?? null, remotes: state?.remotes ?? true, count: state?.count ?? PAGE };
     this.loading = true;
+    let failed = false;
     cx.spawn(async (cx) => {
       try {
         const data = await loadRepo(cwd, on, opts);
@@ -78,11 +87,17 @@ export class Panel {
         this.status = "ready"; this.error = null;
         this.watch(data.root, on, cx);
       } catch (e) {
-        if (this.current(context)) { this.error = String(e?.message ?? e); this.status = this.data ? "ready" : "error"; }
+        failed = true;
+        if (this.current(context)) {
+          this.error = String(e?.message ?? e); this.status = this.data ? "ready" : "error";
+          // A failed extra page gives its count back, so scrolling to the end can ask again.
+          const s = this.data && this.repos.get(this.data.key);
+          if (s && s.count === opts.count && opts.count > this.data.commits.length) s.count = Math.max(PAGE, this.data.commits.length);
+        }
       } finally {
         this.loading = false;
         if (this.again) { this.again = false; this.refresh(cx); }
-        else this.checkMore(cx);
+        else if (!failed) this.checkMore(cx);
         cx.notify();
       }
     });
@@ -153,8 +168,14 @@ export class Panel {
       .on_mouse_up("left", (_e, cx) => cx.timer.after(120, (cx) => this.checkMore(cx)))
       .child(v_virtual_list(id, items.length + (d.more ? 1 : 0), ROW_HEIGHT,
         (i) => items[i]?.hash ?? "more",
-        (range) => {
+        (range, cx) => {
           this.range = range;
+          // Scrolling (wheel or scrollbar) lays the list out again without a render: when the
+          // trailing row comes on screen, ask for the next page after this frame.
+          if (range.end > items.length && d.more && !this.loading && !this.moreQueued) {
+            try { cx.timer.after(0, (cx) => { this.moreQueued = false; this.checkMore(cx); }); this.moreQueued = true; }
+            catch { /* render() and the wheel handler still check */ }
+          }
           const out = [];
           for (let i = range.start; i < range.end; i++) {
             out.push(i < items.length ? this.row(items[i], t, cols, now, mono)
@@ -172,6 +193,9 @@ export class Panel {
       this.seenChanged = changed.at;
       if (this.data && changed.root === this.data.root) this.refresh(cx);
     }
+    // The list's own scrolling may swallow the wheel event that reached the end: whenever a
+    // render sees the trailing row on screen, check again after this frame.
+    if (this.data?.more && !this.loading && this.range.end > this.items().length) cx.timer.after(0, (cx) => this.checkMore(cx));
     const t = theme(), d = this.status === "ready" ? this.data : null;
     const branch = d ? (d.head ?? d.headHash.slice(0, 7)) : "";
     return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
