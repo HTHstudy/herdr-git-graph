@@ -87,7 +87,11 @@ export default class Tabs extends View {
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
       : 10;
     const panel = find(root, "panel"), body = find(root, "panel-body");
-    const enabled = shared("workspace.panels") ?? ["files", "changes", "graph"];
+    // The welcome sets "workspace.panels" (e.g. ["files","changes"]) without knowing Graph: add
+    // it whenever the shown layout's panel-body stack has a `graph` block, and only then, so
+    // this bar stays harmless on a layout without one.
+    const hasGraph = Boolean(body?.children?.some(c => c?.id === "graph"));
+    const enabled = [...new Set([...((shared("workspace.panels") ?? ["files", "changes"]).filter(id => id !== "graph")), ...(hasGraph ? ["graph"] : [])])];
     this.syncPanel(space, panel, body, enabled);
     const panelButton = (id, label, icon) => {
       const on = panel && !panel.hidden && body?.active === id;

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Adds the Graph panel to a Herdr layout and swaps the tabs bar for git-graph-tabs.
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const walk = (n, f) => {
@@ -8,6 +9,9 @@ const walk = (n, f) => {
   f(n);
   for (const v of Object.values(n)) walk(v, f);
 };
+
+/** Herdr's shipped layouts: replaced on every start (an edit is set aside), so never patched. */
+export const SHIPPED = new Set(["main.json", "terminals.json", "win98.json"]);
 
 export function patchLayout(layout) {
   let body = null;
@@ -31,6 +35,10 @@ export function patchLayout(layout) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const file = process.argv[2];
   if (!file) { console.error("usage: patch-layout.mjs <layout.json>"); process.exit(2); }
+  if (SHIPPED.has(path.basename(file))) {
+    console.error(`patch-layout: ${path.basename(file)} is a shipped Herdr layout; clone it (layout.clone) and patch the clone`);
+    process.exit(1);
+  }
   let tmp;
   try {
     const raw = fs.readFileSync(file, "utf8");

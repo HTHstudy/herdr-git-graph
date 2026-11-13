@@ -78,3 +78,17 @@ test("CLI keeps 4-space indentation; real layout is a no-op", () => {
     assert.equal(fs.readFileSync(g, "utf8"), raw);
   }
 });
+
+test("CLI refuses Herdr's shipped layouts (by basename), writes nothing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pl-"));
+  for (const name of ["main.json", "terminals.json", "win98.json"]) {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, JSON.stringify(sample));
+    const r = spawnSync("node", [SCRIPT, f], { encoding: "utf8" });
+    assert.equal(r.status, 1, name);
+    assert.equal(r.stderr.trim().split("\n").length, 1);
+    assert.match(r.stderr, /shipped Herdr layout/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f, "utf8")), sample, "untouched");
+  }
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["main.json", "terminals.json", "win98.json"], "no .bak / tmp");
+});
