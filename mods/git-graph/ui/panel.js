@@ -17,7 +17,7 @@ export class Panel {
     this.repoOf = new Map();
     this.context = null; this.data = null; this.status = "loading"; this.error = null;
     this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0;
-    this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0;
+    this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0; this.moreQueued = false; this.pageFailed = false;
     this.seenChanged = shared("git-graph.changed")?.at ?? null;
     this.refresh(cx);
     cx.timer.every(10000, (cx) => this.refresh(cx));
@@ -63,7 +63,7 @@ export class Panel {
     if (context !== this.context) {
       this.context = context; this.data = null; this.status = "loading"; this.error = null;
       this.chips = new Map(); this.graphW = graphWidth([]); this.range = { start: 0, end: 0 };
-      this.unwatch();
+      this.unwatch(); this.moreQueued = false; this.pageFailed = false;
     }
     if (this.loading) { this.again = true; return; }
     if (!cwd) { this.status = "nofolder"; return; }
@@ -84,7 +84,7 @@ export class Panel {
         this.data = { ...data, on, key: repoKey };
         this.chips = refChips(data.refs, data.head, data.headHash);
         this.graphW = graphWidth(data.rows);
-        this.status = "ready"; this.error = null;
+        this.status = "ready"; this.error = null; this.pageFailed = false;
         this.watch(data.root, on, cx);
       } catch (e) {
         failed = true;
@@ -92,7 +92,10 @@ export class Panel {
           this.error = String(e?.message ?? e); this.status = this.data ? "ready" : "error";
           // A failed extra page gives its count back, so scrolling to the end can ask again.
           const s = this.data && this.repos.get(this.data.key);
-          if (s && s.count === opts.count && opts.count > this.data.commits.length) s.count = Math.max(PAGE, this.data.commits.length);
+          if (s && s.count === opts.count && opts.count > this.data.commits.length) {
+            s.count = Math.max(PAGE, this.data.commits.length);
+            this.pageFailed = true; // no automatic retry until a good load or the person scrolls
+          }
         }
       } finally {
         this.loading = false;
@@ -118,6 +121,24 @@ export class Panel {
     s.count += PAGE;
     this.refresh(cx);
     cx.notify();
+  }
+
+  /**
+   * The automatic trigger (render and the list's row renderer, which runs on every scroll
+   * re-layout): when the trailing row is on screen, check once after this frame.
+   * Skipped after a failed page so a failing load never retries in a loop.
+   */
+  autoMore(cx) {
+    if (this.moreQueued || this.pageFailed || this.loading || !this.data?.more || this.range.end <= this.items().length) return;
+    this.moreQueued = true;
+    try { cx.timer.after(0, (cx) => { this.moreQueued = false; this.checkMore(cx); }); }
+    catch { this.moreQueued = false; /* timers refused here: the wheel / mouse-up path still checks */ }
+  }
+
+  /** The person scrolled or dragged (Task 8: keyboard movement too): retry even after a failed page. */
+  moved(cx) {
+    this.pageFailed = false;
+    cx.timer.after(120, (cx) => this.checkMore(cx));
   }
 
   chip(c, t) {
@@ -164,18 +185,15 @@ export class Panel {
     const cols = visibleColumns(this.width), now = Date.now() / 1000, mono = settings().font_family ?? "JetBrains Mono";
     const id = "graph-rows";
     return div().id("graph-list").flex_1().min_h(0).relative()
-      .on_scroll_wheel((_e, cx) => cx.timer.after(120, (cx) => this.checkMore(cx)))
-      .on_mouse_up("left", (_e, cx) => cx.timer.after(120, (cx) => this.checkMore(cx)))
+      .on_scroll_wheel((_e, cx) => this.moved(cx))
+      .on_mouse_up("left", (_e, cx) => this.moved(cx))
       .child(v_virtual_list(id, items.length + (d.more ? 1 : 0), ROW_HEIGHT,
         (i) => items[i]?.hash ?? "more",
         (range, cx) => {
           this.range = range;
           // Scrolling (wheel or scrollbar) lays the list out again without a render: when the
           // trailing row comes on screen, ask for the next page after this frame.
-          if (range.end > items.length && d.more && !this.loading && !this.moreQueued) {
-            try { cx.timer.after(0, (cx) => { this.moreQueued = false; this.checkMore(cx); }); this.moreQueued = true; }
-            catch { /* render() and the wheel handler still check */ }
-          }
+          this.autoMore(cx);
           const out = [];
           for (let i = range.start; i < range.end; i++) {
             out.push(i < items.length ? this.row(items[i], t, cols, now, mono)
@@ -195,7 +213,7 @@ export class Panel {
     }
     // The list's own scrolling may swallow the wheel event that reached the end: whenever a
     // render sees the trailing row on screen, check again after this frame.
-    if (this.data?.more && !this.loading && this.range.end > this.items().length) cx.timer.after(0, (cx) => this.checkMore(cx));
+    this.autoMore(cx);
     const t = theme(), d = this.status === "ready" ? this.data : null;
     const branch = d ? (d.head ?? d.headHash.slice(0, 7)) : "";
     return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
