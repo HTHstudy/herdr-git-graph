@@ -1,7 +1,7 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
-import { watchFolder, theme, settings, shared, nextCommand } from "herdr";
+import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
@@ -10,12 +10,16 @@ import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/forma
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
+import { diffPaneOf, newDiffPane, gitGraphPanes } from "../lib/diffview.js";
+import { paneKey } from "./diff-pane.js";
 import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
 
 export const ROW_HEIGHT = 26;
 const PAGE = 300;
 /** Loaded commit details kept for instant re-expanding. */
 const DETAIL_CACHE = 50;
+/** How long a fresh split may take to show in panes(). */
+const SPLIT_WAIT = 2000;
 
 export class Panel {
   init(_props, cx) {
@@ -34,6 +38,8 @@ export class Panel {
     /** Find: the query (for every repo), the current match's hash, whether the box has the keyboard. */
     this.query = ""; this.findCur = null; this.finding = false; this.findCache = null;
     this.branchesOpen = false;
+    /** A diff pane split in flight: {tab, at}. */
+    this.splitting = null;
     this.find = InputState.new({ placeholder: "Find" });
     this.find.on("change", (_e, cx) => this.setQuery(this.find.value(), cx));
     this.find.on("submit", (e, cx) => this.stepFind(e?.shift ? -1 : 1, cx));
@@ -222,9 +228,30 @@ export class Panel {
     if (key && this.details.get(key)?.state === "error") this.details.delete(key);
   }
 
-  /** Task 10 replaces this with the diff pane. */
-  openDiff(target) {
-    console.log("git-graph openDiff", JSON.stringify(target));
+  /**
+   * Show a file's diff in this tab's diff pane: the target goes to the tab's shared key
+   * (the pane follows it), and the pane is split in on the right unless the tab has one.
+   */
+  openDiff(target, cx) {
+    const tab = focused()?.tab; // before any await: the person may switch tabs
+    if (!tab) return;
+    setShared("git-graph.diff." + tab, target);
+    const list = panes();
+    if (diffPaneOf(list, tab, shared(paneKey(tab)))) return;
+    // A split asked for a moment ago may not be in panes() yet: don't make a second one.
+    if (this.splitting?.tab === tab && Date.now() - this.splitting.at < SPLIT_WAIT) return;
+    const before = gitGraphPanes(list, tab), mark = { tab, at: Date.now() };
+    this.splitting = mark;
+    run("pane.split", { direction: "right", mod: "git-graph", props: { diff: { tab } } });
+    cx.spawn(async (cx) => {
+      const end = Date.now() + SPLIT_WAIT;
+      while (Date.now() < end) {
+        const pane = newDiffPane(panes(), tab, before);
+        if (pane) { setShared(paneKey(tab), pane); break; }
+        await cx.sleep(20);
+      }
+      if (this.splitting === mark) this.splitting = null;
+    });
   }
 
   /** Ref chips for the loaded data; remote ones only when remote branches are shown. */
@@ -342,8 +369,8 @@ export class Panel {
       if (i >= 0) { s.selected = item.hash; s.scroll.scroll_to_item(i, "center"); this.moved(cx); }
     } else if (item.part === "file") {
       const det = this.details.get(this.detailKey(d.key, s.expanded));
-      if (det?.state === "ready") this.openDiff(commitTarget(d.root, d.on, det.info.hash, det.parent, item.file));
-    } else if (item.part === "ufile") this.openDiff(uncommittedTarget(d.root, d.on, item.file));
+      if (det?.state === "ready") this.openDiff(commitTarget(d.root, d.on, det.info.hash, det.parent, item.file), cx);
+    } else if (item.part === "ufile") this.openDiff(uncommittedTarget(d.root, d.on, item.file), cx);
     else return;
     cx.notify();
   }
