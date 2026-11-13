@@ -8,7 +8,7 @@ import { parseLog, parseRefs, parseStashes } from "../mods/git-graph/lib/parse.j
 import { layoutGraph } from "../mods/git-graph/lib/lanes.js";
 import { refChips } from "../mods/git-graph/lib/format.js";
 import {
-  toggleBranch, removeBranch, pruneFilter, shortRef, branchEntries, filterLabel, findMatches, stepMatch, matchCount,
+  toggleBranch, removeBranch, showUncommitted, pruneFilter, shortRef, branchEntries, filterLabel, findMatches, stepMatch, matchCount,
 } from "../mods/git-graph/lib/filter.js";
 
 const subjects = (out) => parseLog(out).map((c) => c.subject);
@@ -99,4 +99,25 @@ test("stepMatch wraps both ways; matchCount shows n/m", () => {
   assert.equal(matchCount(m, "b"), "2/3");
   assert.equal(matchCount(m, null), "0/3");
   assert.equal(matchCount([], null), "0/0");
+});
+
+test("a branch filter without HEAD drops the Uncommitted row and its false lane", async () => {
+  const d = await fixture(); // dirty tree, HEAD = main
+  const head = git(d, "rev-parse", "HEAD");
+  const filter = ["refs/heads/topic"];
+  const commits = parseLog(git(d, ...logArgs({ branches: filter, remotes: true, count: 300 })));
+  assert.ok(!commits.some((c) => c.hash === head));
+  const show = showUncommitted(true, filter, commits, head);
+  assert.equal(show, false);
+  const rows = layoutGraph(commits, [], head, show);
+  assert.ok(!rows.some((r) => r.kind === "uncommitted"));
+  const clean = layoutGraph(commits, [], head, false);
+  const maxLane = (rs) => Math.max(...rs.flatMap((r) => [r.lane, ...r.lines.flatMap((l) => [l.from, l.to])]));
+  assert.equal(maxLane(rows), maxLane(clean));
+  assert.equal(maxLane(rows), 0); // topic's history is linear
+  // HEAD loaded (filter includes main) or Show All: the row stays.
+  const withMain = parseLog(git(d, ...logArgs({ branches: ["refs/heads/main"], remotes: true, count: 300 })));
+  assert.equal(showUncommitted(true, ["refs/heads/main"], withMain, head), true);
+  assert.equal(showUncommitted(true, null, [], head), true);
+  assert.equal(showUncommitted(false, null, withMain, head), false);
 });

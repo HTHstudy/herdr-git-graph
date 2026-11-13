@@ -89,7 +89,7 @@ export class Panel {
     const { cwd, on, key } = location(), context = key;
     // Reset before the in-flight check: a focus change mid-load must not keep showing the old repo.
     if (context !== this.context) {
-      this.context = context; this.data = null; this.status = "loading"; this.error = null;
+      this.context = context; this.data = null; this.status = "loading"; this.error = null; this.branchesOpen = false;
       this.chips = new Map(); this.graphW = graphWidth([]); this.range = { start: 0, end: 0 };
       this.unwatch(); this.moreQueued = false; this.pageFailed = false;
     }
@@ -454,12 +454,11 @@ export class Panel {
     const bg = selected || current ? t.selected : match ? t.selection : open ? t.surface : null;
     return h_flex().w_full().h(ROW_HEIGHT).flex_none().items_center().pr(10)
       .when(Boolean(bg), (e) => e.bg(bg))
-      .when(current, (e) => e.border_1().border_color(t.accent))
       .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
         .children(chips.map((c) => this.chip(c, t)))
-        .child(div().flex_1().min_w(0).truncate().text_color(dim ? t.dim : t.foreground).child(subject || " ")))
+        .child(div().flex_1().min_w(0).truncate().text_color(current ? t.accent : dim ? t.dim : t.foreground).child(subject || " ")))
       .when(cols.author, (e) => e.child(div().w(110).flex_none().pl(10).truncate().text_color(t.muted).child(author)))
       .when(cols.date, (e) => e.child(div().w(76).flex_none().pl(10).truncate().text_color(t.muted).child(date ? relativeDate(date, now) : "")))
       .when(cols.hash, (e) => e.child(div().w(70).flex_none().pl(10).font_family(mono).text_size(11).text_color(t.dim).child(hash)));

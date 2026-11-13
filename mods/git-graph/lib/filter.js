@@ -45,6 +45,19 @@ export function pruneFilter(filter, refs, remotes) {
   return kept.length === filter.length ? filter : norm(kept);
 }
 
+/**
+ * Whether the graph shows the Uncommitted Changes row: a dirty tree, and HEAD among the loaded
+ * commits (a branch filter that leaves HEAD out would leave the row waiting on an unloaded parent,
+ * drawing a false lane through every row).
+ * @param {boolean} dirty
+ * @param {BranchFilter} filter
+ * @param {{hash:string}[]} commits
+ * @param {string|null} headHash
+ */
+export function showUncommitted(dirty, filter, commits, headHash) {
+  return dirty && (!filter?.length || commits.some((c) => c.hash === headHash));
+}
+
 /** "refs/heads/x" → "x", "refs/remotes/origin/x" → "origin/x". */
 export function shortRef(name) {
   return name.replace(/^refs\/(heads|remotes|tags)\//, "");

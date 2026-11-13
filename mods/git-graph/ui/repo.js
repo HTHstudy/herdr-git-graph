@@ -3,6 +3,7 @@ import { spaces, panes, focused, exec } from "herdr";
 import { READ, logArgs, refsArgs, stashArgs, statusArgs } from "../lib/git.js";
 import { parseLog, parseRefs, parseStashes, parseStatus } from "../lib/parse.js";
 import { layoutGraph } from "../lib/lanes.js";
+import { showUncommitted } from "../lib/filter.js";
 
 const TIMEOUT = 30000;
 
@@ -62,7 +63,7 @@ export async function loadRepo(cwd, on, { branches, remotes, count }) {
     stashes,
     status: entries,
     remotes: remote.code === 0 ? remote.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [],
-    rows: layoutGraph(commits, stashes, headHash, entries.length > 0),
+    rows: layoutGraph(commits, stashes, headHash, showUncommitted(entries.length > 0, branches, commits, headHash)),
     more: commits.length === count,
   };
 }

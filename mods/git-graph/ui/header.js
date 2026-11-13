@@ -45,7 +45,7 @@ function button(id, t, { name, label, compact, disabled, active, onClick }) {
     .text_color(disabled ? t.dim : t.foreground)
     .when(!disabled, (e) => e.hover((s) => s.bg(t.hover)).on_click(onClick))
     .when(Boolean(name), (e) => e.child(icon(name, disabled ? t.dim : t.muted)))
-    .when(Boolean(label) && !compact, (e) => e.child(div().truncate().child(label)));
+    .when(Boolean(label) && !compact, (e) => e.child(div().min_w(0).flex_shrink(1).truncate().child(label)));
 }
 
 function box(checked, t) {
@@ -97,7 +97,7 @@ export function headerElement(p, t) {
       .child(compact ? icon("cloud", t.muted) : div().text_size(12).truncate().child(p.width < 560 ? "Remotes" : "Show Remote Branches")))
     .child(div().id("gg-find").flex_1().min_w(60).h(24).px(6).gap(5).flex().items_center().rounded(6).border_1()
       .border_color(p.finding ? t.accent : t.border).cursor_text()
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); p.focusFind(); })
       .on_key_down((e, cx) => p.findKey(e, cx))
       .child(icon("search", t.dim, 12))
       .child(Input.new(p.find).flex_1().min_w(0).h_full().text_size(12).text_color(t.foreground))
