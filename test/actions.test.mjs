@@ -42,6 +42,19 @@ test("menuFor branch / remote / tag / uncommitted / stash", () => {
   assert.equal(menuFor(unc, ctx)[4].label, "Open Changes panel");
 });
 
+test("detached head omits current-branch-dependent branch/remote items", () => {
+  const d = { ...ctx, head: null };
+  assert.deepEqual(ids(menuFor(branch, d)), ["checkoutBranch", "renameBranch", "deleteBranch", "pushBranch", "sep", "archive", "sep", "copyName"]);
+  assert.deepEqual(ids(menuFor(remote, d)), ["checkoutRemote", "deleteRemote", "fetchIntoLocal", "sep", "archive", "sep", "copyName"]);
+});
+
+test("addTag without remotes has no push field and no push step", () => {
+  const nr = { ...ctx, remotes: [] };
+  const keys = dialogFor("addTag", commit, nr).fields.map((f) => f.key);
+  assert.ok(!keys.includes("push") && !keys.includes("remote"));
+  assert.deepEqual(plan("addTag", commit, { name: "t", annotated: false, push: true }, nr), [["tag", "t", H]]);
+});
+
 test("menus never have leading/trailing/double sep", () => {
   const targets = [commit, mergeC, rootC, branch, curBranch, remote, tag, stash, unc];
   for (const t of targets) for (const c of [ctx, { ...ctx, head: null, remotes: [] }]) {

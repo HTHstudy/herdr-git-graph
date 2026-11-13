@@ -29,6 +29,7 @@ function tidy(items) {
 /** @returns {(MenuItem|"sep")[]} */
 export function menuFor(target, ctx) {
   const hasRemotes = ctx.remotes.length > 0;
+  const attachedHead = ctx.head !== null;
   switch (target.kind) {
     case "commit": {
       const attached = ctx.head !== null;
@@ -53,15 +54,15 @@ export function menuFor(target, ctx) {
       if (target.current) return tidy([M("renameBranch", "Rename Branch…"), push, ...tail]);
       return tidy([
         M("checkoutBranch", "Checkout Branch"), M("renameBranch", "Rename Branch…"),
-        M("deleteBranch", "Delete Branch…"), MERGE_BRANCH,
-        M("rebaseOnBranch", "Rebase current branch on Branch…"), push, ...tail,
+        M("deleteBranch", "Delete Branch…"), attachedHead && MERGE_BRANCH,
+        attachedHead && M("rebaseOnBranch", "Rebase current branch on Branch…"), push, ...tail,
       ]);
     }
     case "remote":
       return tidy([
         M("checkoutRemote", "Checkout Branch…"), M("deleteRemote", "Delete Remote Branch…"),
-        M("fetchIntoLocal", "Fetch into local branch…"), MERGE_BRANCH,
-        M("pullBranch", "Pull into current branch…"), SEP,
+        M("fetchIntoLocal", "Fetch into local branch…"), attachedHead && MERGE_BRANCH,
+        attachedHead && M("pullBranch", "Pull into current branch…"), SEP,
         ARCHIVE, ctx.filtered.includes(target.name) && UNSELECT, SEP,
         M("copyName", "Copy Branch Name to Clipboard"),
       ]);
@@ -128,7 +129,7 @@ export function dialogFor(id, t, ctx) {
     case "addTag":
       return dlg("Add Tag", `Commit ${short(t.hash)}`, "Add Tag", [
         text("name", "Name"), check("annotated", "Annotated tag", true), text("message", "Message"),
-        check("push", "Push to remote"), ...(ctx.remotes.length ? [remoteSelect("Remote", ctx)] : []),
+        ...(ctx.remotes.length ? [check("push", "Push to remote"), remoteSelect("Remote", ctx)] : []),
       ]);
     // createBranch: name, checkout
     case "createBranch":
@@ -233,7 +234,8 @@ export function planFor(id, t, v, ctx) {
   switch (id) {
     case "addTag": {
       const tag = v.annotated ? ["tag", "-a", v.name, "-m", v.message ?? "", t.hash] : ["tag", v.name, t.hash];
-      return v.push ? steps(tag, ["push", remoteName(v, ctx), `refs/tags/${v.name}`]) : steps(tag);
+      const rem = remoteName(v, ctx);
+      return v.push && rem ? steps(tag, ["push", rem, `refs/tags/${v.name}`]) : steps(tag);
     }
     case "createBranch":
       return steps(v.checkout ? ["checkout", "-b", v.name, t.hash] : ["branch", v.name, t.hash]);
