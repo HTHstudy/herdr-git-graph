@@ -1,10 +1,14 @@
 // Menus, dialogs and action plans (git argv) for every Git Graph action.
 // Pure: no herdr / node imports. Plans are argv arrays WITHOUT the leading "git".
 //
-// Target = {kind:"commit",hash,parents,subject} | {kind:"branch",name,current}
-//        | {kind:"remote",name,remote,branch} | {kind:"tag",name,annotated,hash}
+// Target = {kind:"commit",hash,parents,subject} | {kind:"branch",name,current,hash}
+//        | {kind:"remote",name,remote,branch,hash} | {kind:"tag",name,annotated,hash}
 //        | {kind:"stash",selector,hash} | {kind:"uncommitted"}
-// Ctx    = {head: string|null, remotes: string[], filtered: string[], dropable?: boolean}
+//          Hashes are captured at right-click; guards compare them right before acting.
+// Ctx    = {head: string|null, headHash?: string|null, remotes: string[], filtered: string[],
+//           on?: string|null, dropable?: boolean}
+//          headHash: HEAD's commit when the menu opened (Reset refuses if it moved).
+//          on: the space's machine (null = local); Create Archive is local only (folder picker).
 //          dropable: the right-clicked commit is reachable from HEAD with no merge commit
 //          between it and HEAD (checked at right-click; see dropChecks). Drop needs it true.
 // Plan   = {steps: string[][], guards?: Guard[]} | {copy} | {ui, arg?}
@@ -19,7 +23,7 @@ const SEP = "sep";
 
 const MERGE = M("merge", "Merge into current branch…");
 const MERGE_BRANCH = M("mergeBranch", "Merge into current branch…");
-const ARCHIVE = M("archive", "Create Archive");
+const ARCHIVE_ITEM = M("archive", "Create Archive");
 const UNSELECT = M("unselect", "Unselect in Branches Dropdown");
 
 /** Drop falsy entries, collapse repeated / leading / trailing separators. */
@@ -38,6 +42,8 @@ function tidy(items) {
 export function menuFor(target, ctx) {
   const hasRemotes = ctx.remotes.length > 0;
   const attachedHead = ctx.head !== null;
+  // The archive's folder is picked and written on this machine: not offered on a remote space.
+  const ARCHIVE = !ctx.on && ARCHIVE_ITEM;
   switch (target.kind) {
     case "commit": {
       const attached = ctx.head !== null;
@@ -109,7 +115,6 @@ const dlg = (title, detail, confirm, fields = [], danger = false) => ({ title, d
 
 const short = (h) => String(h).slice(0, 7);
 const remoteName = (v, ctx) => v.remote ?? ctx.remotes[0];
-const afterSlash = (n) => n.slice(n.indexOf("/") + 1);
 const modeRadio = (extra) => radio("mode", "Mode", [
   ...(extra ? [{ value: "soft", label: "Soft - keep changes staged" }] : []),
   { value: "mixed", label: "Mixed - keep changes unstaged" },
@@ -185,7 +190,7 @@ export function dialogFor(id, t, ctx) {
     // checkoutRemote: local
     case "checkoutRemote":
       return dlg("Checkout Remote Branch", `Create a local branch tracking ${t.name}`, "Checkout",
-        [text("local", "Local branch name", afterSlash(t.name))]);
+        [text("local", "Local branch name", t.branch)]);
     case "deleteRemote":
       return dlg("Delete Remote Branch", `Delete ${t.branch} from ${t.remote}`, "Delete", [], true);
     // fetchIntoLocal: local, force
@@ -199,8 +204,9 @@ export function dialogFor(id, t, ctx) {
     // deleteTag: remote (checkbox), remoteName
     case "deleteTag":
       return dlg("Delete Tag", `Delete tag ${t.name}`, "Delete", [
-        check("remote", "Also delete on remote"),
-        ...(ctx.remotes.length ? [select("remoteName", "Remote", opts(ctx.remotes), ctx.remotes[0])] : []),
+        ...(ctx.remotes.length
+          ? [check("remote", "Also delete on remote"), select("remoteName", "Remote", opts(ctx.remotes), ctx.remotes[0])]
+          : []),
       ], true);
     // pushTag: remote
     case "pushTag":
@@ -258,6 +264,58 @@ export function headGuard(head) {
     message: "Current branch changed to {out} — reopen the menu." };
 }
 
+/**
+ * The stash the menu named is still at its selector (a newer stash shifts every index).
+ * @param {{selector:string, hash:string}} t
+ * @returns {Guard}
+ */
+export function stashGuard(t) {
+  return { argv: [...READ, "rev-parse", "--verify", "-q", t.selector], expect: { equals: String(t.hash ?? "") },
+    message: "The stash list changed — reopen the menu." };
+}
+
+/**
+ * A ref (e.g. "refs/heads/x", "HEAD") still points where it did at the right-click.
+ * @param {string} ref
+ * @param {string|null|undefined} hash
+ * @returns {Guard}
+ */
+export function tipGuard(ref, hash) {
+  return { argv: [...READ, "rev-parse", "--verify", "-q", ref], expect: { equals: String(hash ?? "") },
+    message: "The branch moved since you opened the menu — reopen it." };
+}
+
+/**
+ * A short ref name still resolves to the commit captured at right-click (not a same-named tag,
+ * and not moved).
+ * @param {{name:string, hash:string}} t
+ * @returns {Guard}
+ */
+export function nameGuard(t) {
+  return { argv: [...READ, "rev-parse", "--verify", "-q", "--end-of-options", `${t.name}^{commit}`],
+    expect: { equals: String(t.hash ?? "") },
+    message: `${t.name} no longer names the commit shown (it moved, or a tag has the same name) — reopen the menu.` };
+}
+
+/** Full ref name for a branch / remote branch / tag Target, so a same-named tag never wins. */
+export function fullRef(t) {
+  if (t.kind === "branch") return `refs/heads/${t.name}`;
+  if (t.kind === "remote") return `refs/remotes/${t.name}`;
+  if (t.kind === "tag") return `refs/tags/${t.name}`;
+  return t.hash;
+}
+
+/**
+ * Where Create Archive writes (folder + file name, default from the ref's name).
+ * @param {any} t Target
+ * @param {{format?:string, name?:string, folder?:string}} v
+ */
+export function archivePath(t, v) {
+  const format = v.format ?? "zip";
+  const name = v.name || `${t.name.replaceAll("/", "-")}.${format}`;
+  return `${v.folder}/${name}`;
+}
+
 const flags = (pairs) => pairs.filter(([on]) => on).map(([, f]) => f);
 const steps = (...s) => ({ steps: s });
 /** Steps that act on the current branch: guarded so they still act on the branch shown. */
@@ -282,24 +340,28 @@ export function planFor(id, t, v, ctx) {
     case "drop": return onHead(ctx, steps(["rebase", "--onto", `${t.hash}^`, t.hash]), dropChecks(t.hash));
     case "merge":
     case "mergeBranch":
+      // The short name keeps git's own message ("Merge branch 'topic'"); the guard makes sure it
+      // still names the commit shown, so a same-named tag (which git would prefer) never wins.
       return onHead(ctx, steps(["merge", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"], [v.noCommit, "--no-commit"]]),
-        t.kind === "commit" ? t.hash : t.name]));
+        t.kind === "commit" ? t.hash : t.name]), t.kind === "commit" ? [] : [nameGuard(t)]);
     case "rebase": return onHead(ctx, steps(["rebase", t.hash]));
-    case "rebaseOnBranch": return onHead(ctx, steps(["rebase", t.name]));
-    case "reset": return onHead(ctx, steps(["reset", `--${v.mode ?? "mixed"}`, t.hash]));
+    case "rebaseOnBranch": return onHead(ctx, steps(["rebase", fullRef(t)]));
+    case "reset": {
+      // Branch first (its message names the switch), then HEAD's commit as shown in the menu.
+      const p = onHead(ctx, steps(["reset", `--${v.mode ?? "mixed"}`, t.hash]));
+      return { ...p, guards: [...p.guards, tipGuard("HEAD", ctx.headHash)] };
+    }
     case "checkoutBranch": return steps(["checkout", t.name]);
     case "renameBranch": return steps(["branch", "-m", t.name, v.name]);
-    case "deleteBranch": return steps(["branch", v.force ? "-D" : "-d", t.name]);
+    case "deleteBranch":
+      return { ...steps(["branch", v.force ? "-D" : "-d", t.name]), guards: [tipGuard(`refs/heads/${t.name}`, t.hash)] };
     case "pushBranch":
       return steps(["push", ...flags([[v.setUpstream, "--set-upstream"], [v.force, "--force-with-lease"]]),
         remoteName(v, ctx), t.name]);
-    case "archive": {
-      const format = v.format ?? "zip";
-      const name = v.name || `${t.name.replaceAll("/", "-")}.${format}`;
-      return steps(["archive", `--format=${format}`, "-o", `${v.folder}/${name}`, t.name]);
-    }
+    case "archive":
+      return steps(["archive", `--format=${v.format ?? "zip"}`, "-o", archivePath(t, v), fullRef(t)]);
     case "checkoutRemote":
-      return steps(["checkout", "-b", v.local ?? afterSlash(t.name), "--track", t.name]);
+      return steps(["checkout", "-b", v.local ?? t.branch, "--track", t.name]);
     case "deleteRemote": return steps(["push", t.remote, "--delete", t.branch]);
     case "fetchIntoLocal":
       return steps(["fetch", t.remote, `${v.force ? "+" : ""}${t.branch}:${v.local ?? t.branch}`]);
@@ -307,7 +369,8 @@ export function planFor(id, t, v, ctx) {
       return onHead(ctx, steps(["pull", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"]]), t.remote, t.branch]));
     case "deleteTag": {
       const s = [["tag", "-d", t.name]];
-      if (v.remote) s.push(["push", v.remoteName ?? ctx.remotes[0], "--delete", `refs/tags/${t.name}`]);
+      const rem = v.remoteName ?? ctx.remotes[0];
+      if (v.remote && rem) s.push(["push", rem, "--delete", `refs/tags/${t.name}`]);
       return { steps: s };
     }
     case "pushTag": return steps(["push", remoteName(v, ctx), `refs/tags/${t.name}`]);
@@ -318,9 +381,10 @@ export function planFor(id, t, v, ctx) {
     case "clean": return steps(["clean", "-f", ...flags([[v.dirs, "-d"]])]);
     case "stashApply":
     case "stashPop":
-      return steps(["stash", id === "stashPop" ? "pop" : "apply", ...flags([[v.index, "--index"]]), t.selector]);
-    case "stashBranch": return steps(["stash", "branch", v.name, t.selector]);
-    case "stashDrop": return steps(["stash", "drop", t.selector]);
+      return { ...steps(["stash", id === "stashPop" ? "pop" : "apply", ...flags([[v.index, "--index"]]), t.selector]),
+        guards: [stashGuard(t)] };
+    case "stashBranch": return { ...steps(["stash", "branch", v.name, t.selector]), guards: [stashGuard(t)] };
+    case "stashDrop": return { ...steps(["stash", "drop", t.selector]), guards: [stashGuard(t)] };
     case "copyHash": return { copy: t.hash };
     case "copySubject": return { copy: t.subject };
     case "copyName":

@@ -6,14 +6,14 @@ import { join } from "node:path";
 import { fixture, git } from "./helpers.mjs";
 import { menuFor, dialogFor, planFor } from "../mods/git-graph/lib/actions.js";
 
-const ctx = { head: "main", remotes: ["origin"], filtered: [] };
+const ctx = { head: "main", headHash: "d".repeat(40), remotes: ["origin"], filtered: [], on: null };
 const H = "a".repeat(40), P1 = "b".repeat(40), P2 = "c".repeat(40);
 const commit = { kind: "commit", hash: H, parents: [P1], subject: "subj" };
 const mergeC = { ...commit, parents: [P1, P2] };
 const rootC = { ...commit, parents: [] };
-const branch = { kind: "branch", name: "topic", current: false };
+const branch = { kind: "branch", name: "topic", current: false, hash: P1 };
 const curBranch = { kind: "branch", name: "main", current: true };
-const remote = { kind: "remote", name: "origin/x", remote: "origin", branch: "x" };
+const remote = { kind: "remote", name: "origin/x", remote: "origin", branch: "x", hash: P2 };
 const tag = { kind: "tag", name: "v1.1", annotated: true, hash: H };
 const stash = { kind: "stash", selector: "stash@{0}", hash: H };
 const unc = { kind: "uncommitted" };
@@ -50,6 +50,24 @@ test("detached head omits current-branch-dependent branch/remote items", () => {
   assert.deepEqual(ids(menuFor(remote, d)), ["checkoutRemote", "deleteRemote", "fetchIntoLocal", "sep", "archive", "sep", "copyName"]);
 });
 
+test("deleteTag without remotes: no remote fields and no push step", () => {
+  const nr = { ...ctx, remotes: [] };
+  assert.deepEqual(dialogFor("deleteTag", tag, nr).fields, []);
+  assert.deepEqual(plan("deleteTag", tag, { remote: true }, nr), [["tag", "-d", "v1.1"]]);
+  assert.deepEqual(dialogFor("deleteTag", tag, ctx).fields.map((f) => f.key), ["remote", "remoteName"]);
+});
+
+test("Create Archive is not offered on a remote space", () => {
+  const r = { ...ctx, on: "server" };
+  for (const t of [branch, curBranch, remote, tag]) {
+    assert.ok(ids(menuFor(t, ctx)).includes("archive"));
+    const m = ids(menuFor(t, r));
+    assert.ok(!m.includes("archive"), t.kind);
+    assert.ok(m.at(-1) !== "sep" && !m.some((x, i) => x === "sep" && m[i + 1] === "sep"), t.kind);
+  }
+  assert.deepEqual(ids(menuFor(tag, r)), ["tagDetails", "deleteTag", "pushTag", "sep", "copyTagName"]);
+});
+
 test("addTag without remotes has no push field and no push step", () => {
   const nr = { ...ctx, remotes: [] };
   const keys = dialogFor("addTag", commit, nr).fields.map((f) => f.key);
@@ -83,7 +101,11 @@ test("dialogFor defaults", () => {
   assert.equal(f("stashPush", unc, "includeUntracked").value, true);
   assert.equal(f("stashApply", stash, "index").value, false);
   assert.equal(f("clean", unc, "dirs").value, false);
-  assert.equal(f("checkoutRemote", { ...remote, name: "origin/feat/y" }, "local").value, "feat/y");
+  assert.equal(f("checkoutRemote", { ...remote, name: "origin/feat/y", branch: "feat/y" }, "local").value, "feat/y");
+  // A remote named "a/b": the local name is the branch part, not everything after the first "/".
+  assert.equal(f("checkoutRemote", { kind: "remote", name: "a/b/feat", remote: "a/b", branch: "feat" }, "local").value, "feat");
+  assert.deepEqual(plan("checkoutRemote", { kind: "remote", name: "a/b/feat", remote: "a/b", branch: "feat" }, {}),
+    [["checkout", "-b", "feat", "--track", "a/b/feat"]]);
   assert.equal(f("archive", branch, "format").value, "zip");
 });
 
@@ -115,8 +137,11 @@ test("planFor argv", () => {
   assert.deepEqual(plan("drop", commit), [["rebase", "--onto", `${H}^`, H]]);
   assert.deepEqual(plan("merge", commit, { noFF: true, squash: false, noCommit: true }), [["merge", "--no-ff", "--no-commit", H]]);
   assert.deepEqual(plan("mergeBranch", branch, { squash: true }), [["merge", "--squash", "topic"]]);
+  assert.deepEqual(planFor("mergeBranch", branch, {}, ctx).guards[0], nameGuard(branch));
+  assert.deepEqual(planFor("mergeBranch", remote, {}, ctx).guards[0], nameGuard(remote));
+  assert.deepEqual(planFor("merge", commit, {}, ctx).guards, [headGuard("main")]);
   assert.deepEqual(plan("rebase", commit), [["rebase", H]]);
-  assert.deepEqual(plan("rebaseOnBranch", branch), [["rebase", "topic"]]);
+  assert.deepEqual(plan("rebaseOnBranch", branch), [["rebase", "refs/heads/topic"]]);
   for (const m of ["soft", "mixed", "hard"]) assert.deepEqual(plan("reset", commit, { mode: m }), [["reset", `--${m}`, H]]);
   assert.deepEqual(plan("checkoutBranch", branch), [["checkout", "topic"]]);
   assert.deepEqual(plan("renameBranch", branch, { name: "new" }), [["branch", "-m", "topic", "new"]]);
@@ -124,8 +149,10 @@ test("planFor argv", () => {
   assert.deepEqual(plan("deleteBranch", branch, { force: true }), [["branch", "-D", "topic"]]);
   assert.deepEqual(plan("pushBranch", branch, { remote: "origin", setUpstream: true, force: true }), [["push", "--set-upstream", "--force-with-lease", "origin", "topic"]]);
   assert.deepEqual(plan("pushBranch", branch, { remote: "origin" }), [["push", "origin", "topic"]]);
-  assert.deepEqual(plan("archive", branch, { format: "tar", name: "a.tar", folder: "/x" }), [["archive", "--format=tar", "-o", "/x/a.tar", "topic"]]);
-  assert.deepEqual(plan("archive", branch, { format: "zip", name: "", folder: "/x" }), [["archive", "--format=zip", "-o", "/x/topic.zip", "topic"]]);
+  assert.deepEqual(plan("archive", branch, { format: "tar", name: "a.tar", folder: "/x" }), [["archive", "--format=tar", "-o", "/x/a.tar", "refs/heads/topic"]]);
+  assert.deepEqual(plan("archive", branch, { format: "zip", name: "", folder: "/x" }), [["archive", "--format=zip", "-o", "/x/topic.zip", "refs/heads/topic"]]);
+  assert.deepEqual(plan("archive", remote, { format: "zip", name: "", folder: "/x" }), [["archive", "--format=zip", "-o", "/x/origin-x.zip", "refs/remotes/origin/x"]]);
+  assert.deepEqual(plan("archive", tag, { format: "zip", name: "", folder: "/x" }), [["archive", "--format=zip", "-o", "/x/v1.1.zip", "refs/tags/v1.1"]]);
   assert.deepEqual(plan("checkoutRemote", remote, { local: "x" }), [["checkout", "-b", "x", "--track", "origin/x"]]);
   assert.deepEqual(plan("deleteRemote", remote), [["push", "origin", "--delete", "x"]]);
   assert.deepEqual(plan("fetchIntoLocal", remote, { local: "l", force: true }), [["fetch", "origin", "+x:l"]]);
@@ -170,7 +197,7 @@ const byMsg = (d, m) => git(d, "log", "--all", "--format=%H", `--grep=^${m}$`, "
 async function fx(clean = true) {
   const d = await fixture();
   if (clean) { git(d, "reset", "--hard"); git(d, "clean", "-fd"); }
-  const c = { head: git(d, "branch", "--show-current"), remotes: ["origin"], filtered: [] };
+  const c = { head: git(d, "branch", "--show-current"), headHash: git(d, "rev-parse", "HEAD"), remotes: ["origin"], filtered: [] };
   const cm = (m) => { const h = byMsg(d, m); return { kind: "commit", hash: h, parents: git(d, "log", "-1", "--format=%P", h).split(" ").filter(Boolean), subject: m }; };
   return { d, c, cm };
 }
@@ -276,7 +303,7 @@ test("int: stash push/apply/pop/branch/drop", async () => {
   run(d, planFor("stashPush", unc, { includeUntracked: true, message: "m2" }, c));
   assert.equal(n(), 2);
   assert.equal(git(d, "status", "--porcelain"), "");
-  const st = (sel) => ({ kind: "stash", selector: sel, hash: "" });
+  const st = (sel) => ({ kind: "stash", selector: sel, hash: rev(d, sel) });
   run(d, planFor("stashApply", st("stash@{0}"), { index: true }, c));
   assert.equal(n(), 2); assert.notEqual(git(d, "status", "--porcelain"), "");
   git(d, "reset", "--hard"); git(d, "clean", "-fd");
@@ -309,9 +336,10 @@ test("int: archive zip", async () => {
 
 // ---- guards (review fixes 1 and 6) -----------------------------------------
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { guardPasses, guardMessage } from "../mods/git-graph/lib/run.js";
-import { dropChecks, headGuard } from "../mods/git-graph/lib/actions.js";
+import { dropChecks, headGuard, stashGuard, tipGuard, nameGuard } from "../mods/git-graph/lib/actions.js";
+import { READ } from "../mods/git-graph/lib/git.js";
 
 /** The first failing guard's message (as runPlan would show it), or null. */
 function checkGuards(dir, guards) {
@@ -325,16 +353,20 @@ function checkGuards(dir, guards) {
 
 test("guards: which plans carry them", () => {
   const head = headGuard("main");
-  for (const [id, t] of [["reset", commit], ["merge", commit], ["mergeBranch", branch], ["rebase", commit],
+  for (const [id, t] of [["merge", commit], ["mergeBranch", branch], ["rebase", commit],
     ["rebaseOnBranch", branch], ["pullBranch", remote], ["drop", commit]]) {
     const g = planFor(id, t, { mode: "hard" }, ctx).guards;
     assert.deepEqual(g.at(-1), head, id);
   }
   assert.deepEqual(planFor("drop", commit, {}, ctx).guards.slice(0, 2), dropChecks(H));
-  for (const id of ["cherryPick", "checkout", "deleteBranch", "stashDrop"]) {
-    const t = id === "deleteBranch" ? branch : id === "stashDrop" ? stash : commit;
-    assert.equal(planFor(id, t, {}, ctx).guards, undefined, id);
-  }
+  for (const id of ["cherryPick", "checkout"]) assert.equal(planFor(id, commit, {}, ctx).guards, undefined, id);
+  for (const id of ["stashApply", "stashPop", "stashBranch", "stashDrop"])
+    assert.deepEqual(planFor(id, stash, { name: "x" }, ctx).guards, [stashGuard(stash)], id);
+  assert.deepEqual(stashGuard(stash), { argv: [...READ, "rev-parse", "--verify", "-q", "stash@{0}"], expect: { equals: H },
+    message: "The stash list changed — reopen the menu." });
+  for (const force of [false, true])
+    assert.deepEqual(planFor("deleteBranch", branch, { force }, ctx).guards, [tipGuard("refs/heads/topic", P1)]);
+  assert.deepEqual(planFor("reset", commit, { mode: "hard" }, ctx).guards, [head, tipGuard("HEAD", ctx.headHash)]);
   assert.deepEqual(head.argv.slice(-4), ["symbolic-ref", "--short", "-q", "HEAD"]);
 });
 
@@ -362,6 +394,60 @@ test("int: drop checks — off-branch commit and commit before a merge are refus
   assert.equal(checkGuards(d, p.guards), null);
   run(d, p);
   assert.ok(!git(d, "log", "--format=%s").split("\n").includes("rename"));
+});
+
+test("int: stash guard — a newer stash shifts the index: Drop is refused and the target survives", async () => {
+  const { d, c } = await fx(false);
+  const target = { kind: "stash", selector: "stash@{0}", hash: rev(d, "stash@{0}") };
+  const p = planFor("stashDrop", target, {}, c);
+  assert.equal(checkGuards(d, p.guards), null, "unchanged list: passes");
+  git(d, "stash", "push", "-u", "-m", "newer");
+  assert.equal(checkGuards(d, p.guards), "The stash list changed — reopen the menu.");
+  assert.ok(git(d, "stash", "list", "--format=%H").split("\n").includes(target.hash), "original stash survives");
+  // Reopened on the shifted list: the same stash is now stash@{1}, and dropping it works.
+  const again = planFor("stashDrop", { ...target, selector: "stash@{1}" }, {}, c);
+  assert.equal(checkGuards(d, again.guards), null);
+  run(d, again);
+  assert.ok(!git(d, "stash", "list", "--format=%H").split("\n").includes(target.hash));
+  assert.match(git(d, "stash", "list"), /newer/);
+});
+
+test("int: tip guards — a commit after the right-click blocks Reset and Delete Branch -D", async () => {
+  const { d, c, cm } = await fx();
+  const c2 = { ...c, headHash: rev(d, "HEAD") };
+  const reset = planFor("reset", cm("add a"), { mode: "hard" }, c2);
+  const tb = { kind: "branch", name: "topic", current: false, hash: rev(d, "topic") };
+  const del = planFor("deleteBranch", tb, { force: true }, c2);
+  assert.equal(checkGuards(d, reset.guards), null);
+  assert.equal(checkGuards(d, del.guards), null);
+  git(d, "commit", "-q", "--allow-empty", "-m", "late on main");
+  const mainNow = rev(d, "HEAD");
+  assert.equal(checkGuards(d, reset.guards), "The branch moved since you opened the menu — reopen it.");
+  assert.equal(rev(d, "HEAD"), mainNow);
+  git(d, "checkout", "-q", "topic"); git(d, "commit", "-q", "--allow-empty", "-m", "late on topic"); git(d, "checkout", "-q", "main");
+  assert.equal(checkGuards(d, del.guards), "The branch moved since you opened the menu — reopen it.");
+  assert.match(git(d, "branch", "--list", "topic"), /topic/, "topic not deleted");
+});
+
+test("int: a tag named like a branch never wins (rebase / archive use full refs; merge is guarded)", async () => {
+  const { d, c, cm } = await fx();
+  const tb = { kind: "branch", name: "topic", current: false, hash: rev(d, "refs/heads/topic") };
+  const merge = planFor("mergeBranch", tb, { noFF: true }, c);
+  assert.equal(checkGuards(d, merge.guards), null, "unambiguous: merge allowed");
+  git(d, "tag", "topic", cm("add a").hash); // ambiguous: git would resolve "topic" to the tag
+  assert.equal(rev(d, "topic"), cm("add a").hash);
+  assert.match(checkGuards(d, merge.guards), /^topic no longer names the commit shown/);
+  // Archive: the branch's tree, not the tag's (the tag's commit lacks files added later).
+  const folder = mkdtempSync(join(tmpdir(), "gg arch-"));
+  run(d, planFor("archive", tb, { format: "tar", name: "", folder }, c));
+  const tarList = (f) => execFileSync("tar", ["-tf", f], { encoding: "utf8" }).split("\n").filter(Boolean).sort();
+  const branchFiles = git(d, "ls-tree", "-r", "--name-only", "refs/heads/topic").split("\n").sort();
+  assert.deepEqual(tarList(join(folder, "topic.tar")), branchFiles);
+  // Rebase on the branch (from main): topic's tip becomes an ancestor of HEAD, not the tag's.
+  const p = planFor("rebaseOnBranch", tb, {}, c);
+  assert.equal(p.steps[0].at(-1), "refs/heads/topic");
+  git(d, "-c", "core.editor=true", ...p.steps[0]);
+  git(d, "merge-base", "--is-ancestor", "refs/heads/topic", "HEAD");
 });
 
 test("int: head guard — a branch switch after the dialog opened blocks reset", async () => {

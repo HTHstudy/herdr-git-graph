@@ -22,12 +22,15 @@ test("busyLabel: fresh value gives its label; empty, malformed and stale give nu
   assert.equal(busyLabel(busyValue("X", now + BUSY_STALE + 1), now), null, "a clock far ahead is not trusted either");
 });
 
-test("stepTimeout: network steps 120 s, others 30 s", () => {
+test("stepTimeout: tree-rewriting 600 s, network 120 s, quick ref ops 30 s", () => {
   assert.equal(stepTimeout(["fetch", "--all"]), 120000);
   assert.equal(stepTimeout(["push", "origin", "--delete", "x"]), 120000);
-  assert.equal(stepTimeout(["pull", "origin", "x"]), 120000);
-  assert.equal(stepTimeout(["reset", "--hard", "abc"]), 30000);
-  assert.equal(stepTimeout(["cherry-pick", "abc"]), 30000);
+  for (const s of [["stash", "pop", "stash@{0}"], ["clean", "-f"], ["checkout", "x"], ["rebase", "x"], ["merge", "x"],
+    ["cherry-pick", "abc"], ["revert", "abc"], ["reset", "--hard", "abc"], ["pull", "origin", "x"]])
+    assert.equal(stepTimeout(s), 600000, s[0]);
+  for (const s of [["branch", "-d", "x"], ["branch", "-m", "a", "b"], ["tag", "-d", "v"], ["tag", "-a", "v", "-m", "", "abc"]])
+    assert.equal(stepTimeout(s), 30000, s.join(" "));
+  assert.ok(BUSY_STALE > 600000, "the busy lock outlives one long step");
 });
 
 test("envArgv: no prompt, no editor, no merge editor", () => {

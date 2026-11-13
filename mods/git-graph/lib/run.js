@@ -1,9 +1,10 @@
 // Pure parts of running an action plan: the busy lock's value, argv/timeout per step, and what
 // to tell the person afterwards. Plain ES module (runs in Herdr and Node).
 
-/** A busy value older than this is left over (e.g. a quit mid-action) and ignored. */
-export const BUSY_STALE = 10 * 60 * 1000;
-/** Per-step timeouts: network steps get longer. */
+/** A busy value older than this is left over (e.g. a quit mid-action) and ignored. Longer
+ * than one LONG_TIMEOUT step, so a slow rebase still holds the lock. */
+export const BUSY_STALE = 15 * 60 * 1000;
+/** Per-step timeouts (see stepTimeout). */
 export const NETWORK_TIMEOUT = 120000;
 export const LOCAL_TIMEOUT = 30000;
 
@@ -28,11 +29,21 @@ export function busyLabel(value, now) {
   return label;
 }
 
+/** Steps that rewrite the work tree (a big repo or hooks can take minutes). */
+export const LONG_TIMEOUT = 600000;
+
 /** Network steps, and archive (a big tree takes a while to write). */
 const NETWORK = new Set(["push", "fetch", "pull", "archive"]);
+/** Tree-rewriting steps: never cut off mid-way by a short timeout. */
+const LONG = new Set(["stash", "clean", "checkout", "rebase", "merge", "cherry-pick", "revert", "reset", "pull"]);
 
-/** @param {string[]} step git argv without "git" */
-export const stepTimeout = (step) => (NETWORK.has(step[0]) ? NETWORK_TIMEOUT : LOCAL_TIMEOUT);
+/**
+ * Per-step timeout: tree-rewriting (incl. pull, which merges) 600 s, push / fetch / archive 120 s, quick ref ops
+ * (branch / tag create, rename, delete) 30 s.
+ * @param {string[]} step git argv without "git"
+ */
+export const stepTimeout = (step) =>
+  (LONG.has(step[0]) ? LONG_TIMEOUT : NETWORK.has(step[0]) ? NETWORK_TIMEOUT : LOCAL_TIMEOUT);
 
 /**
  * `env` argv that runs git with no credential prompt and no editor, so nothing can hang.

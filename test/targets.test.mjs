@@ -21,21 +21,22 @@ test("rowTarget: commit, stash, uncommitted", () => {
 });
 
 test("refTarget: branch, tag, remote (longest known remote wins)", () => {
-  assert.deepEqual(refTarget({ kind: "head", short: "topic", current: false, annotated: false, hash: H }, []), { kind: "branch", name: "topic", current: false });
-  assert.deepEqual(refTarget({ kind: "head", short: "main", current: true, annotated: false, hash: H }, []), { kind: "branch", name: "main", current: true });
+  assert.deepEqual(refTarget({ kind: "head", short: "topic", current: false, annotated: false, hash: H }, []), { kind: "branch", name: "topic", current: false, hash: H });
+  assert.deepEqual(refTarget({ kind: "head", short: "main", current: true, annotated: false, hash: H }, []), { kind: "branch", name: "main", current: true, hash: H });
   assert.deepEqual(refTarget({ kind: "tag", short: "v1.1", current: false, annotated: true, hash: H }, []), { kind: "tag", name: "v1.1", annotated: true, hash: H });
   assert.deepEqual(refTarget({ kind: "remote", short: "origin/feature/x", current: false, annotated: false, hash: H }, ["origin"]),
-    { kind: "remote", name: "origin/feature/x", remote: "origin", branch: "feature/x" });
+    { kind: "remote", name: "origin/feature/x", remote: "origin", branch: "feature/x", hash: H });
   assert.deepEqual(splitRemote("up/stream/main", ["up", "up/stream"]), { remote: "up/stream", branch: "main" });
   assert.deepEqual(splitRemote("gone/main", []), { remote: "gone", branch: "main" });
 });
 
 test("menuCtx: short names in `filtered`, so Unselect shows for a filtered branch", () => {
   const ctx = menuCtx({ head: "main", remotes: ["origin"] }, ["refs/heads/topic", "refs/remotes/origin/feature/x"]);
-  assert.deepEqual(ctx, { head: "main", remotes: ["origin"], filtered: ["topic", "origin/feature/x"] });
+  assert.deepEqual(ctx, { head: "main", headHash: null, on: null, remotes: ["origin"], filtered: ["topic", "origin/feature/x"] });
+  assert.deepEqual(menuCtx({ head: "main", headHash: H, on: "box", remotes: [] }, null), { head: "main", headHash: H, on: "box", remotes: [], filtered: [] });
   assert.ok(menuFor({ kind: "branch", name: "topic", current: false }, ctx).some((i) => i.id === "unselect"));
   assert.ok(menuFor({ kind: "remote", name: "origin/feature/x", remote: "origin", branch: "feature/x" }, ctx).some((i) => i.id === "unselect"));
-  assert.deepEqual(menuCtx({ head: null, remotes: [] }, null), { head: null, remotes: [], filtered: [] });
+  assert.deepEqual(menuCtx({ head: null, remotes: [] }, null), { head: null, headHash: null, on: null, remotes: [], filtered: [] });
 });
 
 test("menuHeight: rows 31, separators 9, padding 10", () => {

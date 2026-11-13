@@ -8,7 +8,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Checkbox } from "gpui-base";
 import { props, closeOverlay, theme, settings, exec, pickFolder } from "herdr";
-import { dialogFor, planFor } from "../lib/actions.js";
+import { dialogFor, planFor, archivePath } from "../lib/actions.js";
 import { initialValues, missingFields, cleanValues, tagDetailsArgs, parseTagDetails } from "../lib/targets.js";
 import { absoluteDate } from "../lib/details.js";
 import { request } from "./menu.js";
@@ -18,6 +18,7 @@ export class Dialog {
     const p = this.p();
     this.handle = cx.focus_handle();
     this.done = false;
+    this.error = null;
     this.focusedKey = null;
     this.inputs = new Map();
     if (p.id === "tagDetails") { this.loadTag(p, cx); this.handle.focus(); return; }
@@ -27,7 +28,7 @@ export class Dialog {
       if (f.type !== "text") continue;
       const st = InputState.new({ value: String(f.value ?? "") });
       if (f.value) st.set_selected_range({ start: 0, end: String(f.value).length });
-      st.on("change", (_e, cx) => { this.values[f.key] = st.value(); cx.notify(); });
+      st.on("change", (_e, cx) => { this.values[f.key] = st.value(); this.error = null; cx.notify(); });
       st.on("submit", (_e, cx) => { if (!this.dangerous()) this.confirm(cx); });
       st.on("focus", (_e, cx) => { this.focusedKey = f.key; cx.notify(); });
       st.on("blur", (_e, cx) => { if (this.focusedKey === f.key) this.focusedKey = null; cx.notify(); });
@@ -53,10 +54,30 @@ export class Dialog {
   }
 
   /** Only the confirm button calls this for a dangerous dialog (⏎ is ignored there). */
-  confirm(_cx) {
-    if (this.done || !this.dialog || this.missing().length) return;
-    const p = this.p();
-    const plan = planFor(p.id, p.target, cleanValues(this.dialog, this.values), p.ctx);
+  confirm(cx) {
+    if (this.done || this.checking || !this.dialog || this.missing().length) return;
+    const p = this.p(), values = cleanValues(this.dialog, this.values);
+    // Create Archive never overwrites: look for the file first (local only: the menu hides
+    // Create Archive on a remote space), and say so inline.
+    if (p.id === "archive") {
+      const path = archivePath(p.target, values);
+      this.checking = true;
+      cx.spawn(async (cx) => {
+        let exists = true;
+        try { exists = (await exec("test", ["-e", path], { timeout: 10000 })).code === 0; } catch { exists = true; }
+        this.checking = false;
+        if (exists) this.error = `File exists: ${path}`;
+        else this.finish(p, values);
+        cx.notify();
+      });
+      return;
+    }
+    this.finish(p, values);
+  }
+
+  finish(p, values) {
+    if (this.done) return;
+    const plan = planFor(p.id, p.target, values, p.ctx);
     this.done = true;
     if (plan.steps) request(p, { run: { label: p.label, plan } });
     closeOverlay(props()?.overlay);
@@ -80,7 +101,7 @@ export class Dialog {
     const st = this.inputs.get("folder");
     cx.spawn(async (cx) => {
       const folder = await pickFolder({ prompt: "Choose" }).catch(() => null);
-      if (folder && st) { st.set_value(folder); this.values.folder = folder; }
+      if (folder && st) { st.set_value(folder); this.values.folder = folder; this.error = null; }
       cx.notify();
     });
   }
@@ -116,7 +137,7 @@ export class Dialog {
     if (f.type === "radio") {
       return v_flex().flex_none().child(label(f.label))
         .children(f.options.map((o, i) => h_flex().id(`gg-dlg-${f.key}-${i}`).h(26).gap(8).items_center().cursor_pointer()
-          .on_click((_e, cx) => { this.values[f.key] = o.value; cx.notify(); })
+          .on_click((_e, cx) => { this.values[f.key] = o.value; this.error = null; cx.notify(); })
           .child(box(v === o.value, t, true)).child(div().min_w(0).truncate().text_size(12.5).child(o.label))));
     }
     // select: one button per choice
@@ -161,7 +182,8 @@ export class Dialog {
       .child(div().pt(6).flex_none().text_color(t.muted).truncate().child(d.detail ?? ""))
       .child(v_flex().id("gg-dlg-fields").flex_1().min_h(0).overflow_y_scrollbar().children(d.fields.map((f) => this.field(f, t))))
       .child(h_flex().flex_none().pt(14).gap(8).justify_end().items_center().text_size(12)
-        .when(danger, (e) => e.child(div().flex_1().text_size(11).text_color(t.dim).child("Click to confirm")))
+        .when(Boolean(this.error), (e) => e.child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.ansi1).child(this.error)))
+        .when(danger && !this.error, (e) => e.child(div().flex_1().text_size(11).text_color(t.dim).child("Click to confirm")))
         .child(button("gg-dlg-cancel", "Cancel", t, { onClick: () => this.close() }))
         .child(button("gg-dlg-ok", d.confirm, t, { primary: true, danger, disabled: blocked, onClick: (_e, cx) => this.confirm(cx) })));
   }

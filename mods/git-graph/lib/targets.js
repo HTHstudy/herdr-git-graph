@@ -33,19 +33,22 @@ export function splitRemote(short, remotes) {
  * @param {string[]} remotes
  */
 export function refTarget(ref, remotes) {
-  if (ref.kind === "head") return { kind: "branch", name: ref.short, current: Boolean(ref.current) };
+  if (ref.kind === "head") return { kind: "branch", name: ref.short, current: Boolean(ref.current), hash: ref.hash };
   if (ref.kind === "tag") return { kind: "tag", name: ref.short, annotated: Boolean(ref.annotated), hash: ref.hash };
-  return { kind: "remote", name: ref.short, ...splitRemote(ref.short, remotes) };
+  return { kind: "remote", name: ref.short, ...splitRemote(ref.short, remotes), hash: ref.hash };
 }
 
 /**
  * The menu Ctx: `filtered` holds short names ("topic", "origin/x") as lib/actions.js compares
  * them against Target names; the panel's filter keeps full ref names.
- * @param {{head:string|null, remotes:string[]}} data
+ * `headHash` (HEAD's commit now) lets Reset refuse if HEAD moves; `on` (the space's machine)
+ * hides local-only items.
+ * @param {{head:string|null, headHash?:string|null, on?:string|null, remotes:string[]}} data
  * @param {string[]|null} filter
  */
 export function menuCtx(data, filter) {
-  return { head: data.head ?? null, remotes: [...data.remotes], filtered: (filter ?? []).map(shortRef) };
+  return { head: data.head ?? null, headHash: data.headHash ?? null, on: data.on ?? null,
+    remotes: [...data.remotes], filtered: (filter ?? []).map(shortRef) };
 }
 
 /** Pixel height of a menu popup (rows 31, separators 9, padding 5 each side, title 26). */
