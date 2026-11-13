@@ -65,3 +65,14 @@ export function commitInfoArgs(hash) {
     hash,
   ];
 }
+
+/**
+ * Change kinds (A/M/D/R…) of a commit's files, against `parent` (null → root commit).
+ * @param {string} hash
+ * @param {string|null} parent
+ * @returns {string[]}
+ */
+export function commitStatusArgs(hash, parent) {
+  if (parent === null) return [...READ, "diff-tree", "--root", "--name-status", "-z", "-M", "-r", hash];
+  return [...READ, "diff", "--name-status", "-z", "-M", parent, hash];
+}

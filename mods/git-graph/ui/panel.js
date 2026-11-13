@@ -1,13 +1,19 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
-import { watchFolder, theme, settings, shared } from "herdr";
-import { location, loadRepo } from "./repo.js";
+import { watchFolder, theme, settings, shared, nextCommand } from "herdr";
+import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
+import { detailElement } from "./details.js";
 import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/format.js";
+import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
+import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
+import { detailItems, commitFiles, commitTarget, uncommittedTarget } from "../lib/details.js";
 
 export const ROW_HEIGHT = 26;
 const PAGE = 300;
+/** Loaded commit details kept for instant re-expanding. */
+const DETAIL_CACHE = 50;
 
 export class Panel {
   init(_props, cx) {
@@ -19,6 +25,18 @@ export class Panel {
     this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0;
     this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0; this.moreQueued = false; this.pageFailed = false;
     this.seenChanged = shared("git-graph.changed")?.at ?? null;
+    /** repoKey + hash → CommitDetail, oldest first (bounded). */
+    this.details = new Map();
+    this.itemCache = null; this.viewH = 0; this.copied = null;
+    this.handle = cx.focus_handle();
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "focus") this.handle.focus();
+        else this.command(c, cx); // "up" | "down" | "toggle" | "collapse" | "find": bindable in keys.json
+        cx.notify();
+      }
+    });
     this.refresh(cx);
     cx.timer.every(10000, (cx) => this.refresh(cx));
   }
@@ -27,7 +45,7 @@ export class Panel {
   repo(repoKey) {
     let s = this.repos.get(repoKey);
     if (!s) {
-      s = { expanded: null, branches: null, remotes: true, count: PAGE, scroll: VirtualListScrollHandle.new() };
+      s = { expanded: null, selected: null, branches: null, remotes: true, count: PAGE, scroll: VirtualListScrollHandle.new() };
       this.repos.set(repoKey, s);
     }
     return s;
@@ -106,9 +124,169 @@ export class Panel {
     });
   }
 
-  /** The rows the list shows (Task 8 adds detail rows between them). */
+  /**
+   * What the list shows: each graph row, and under the expanded one its detail items.
+   * Each entry has a unique `key` and its own `size`. Rebuilt only when the data, the
+   * expanded row or its detail changes.
+   * @returns {({key:string, part:"row", size:number, row:any} | import("../lib/details.js").DetailItem)[]}
+   */
   items() {
-    return this.data?.rows ?? [];
+    const d = this.data;
+    if (!d) return [];
+    const exp = this.repo(d.key).expanded;
+    const det = exp ? this.details.get(this.detailKey(d.key, exp)) ?? null : null;
+    const c = this.itemCache;
+    if (c && c.data === d && c.exp === exp && c.det === det) return c.items;
+    const items = [], index = new Map(), rows = new Map();
+    for (const row of d.rows) {
+      rows.set(row.hash, row);
+      index.set(row.hash, items.length);
+      items.push({ key: row.hash, part: "row", size: ROW_HEIGHT, row });
+      if (row.hash === exp) for (const it of detailItems(row, det, d.status)) { index.set(it.key, items.length); items.push(it); }
+    }
+    this.itemCache = { data: d, exp, det, items, index, rows };
+    return items;
+  }
+
+  /** Index of an item key in items(), or -1. */
+  indexOf(key) {
+    this.items();
+    return this.itemCache?.index.get(key) ?? -1;
+  }
+
+  detailKey(repoKey, hash) {
+    return repoKey + "\0" + hash;
+  }
+
+  setDetail(key, value) {
+    this.details.delete(key);
+    this.details.set(key, value);
+    while (this.details.size > DETAIL_CACHE) this.details.delete(this.details.keys().next().value);
+  }
+
+  /** The expanded commit or stash has no detail yet: load it. */
+  ensureDetail(cx) {
+    const d = this.data;
+    if (!d || this.status !== "ready") return;
+    const repoKey = d.key, hash = this.repo(repoKey).expanded;
+    if (!hash || hash === "*") return;
+    const key = this.detailKey(repoKey, hash);
+    if (this.details.has(key)) return; // loaded, loading, or failed (reopening the row retries)
+    const row = d.rows.find((r) => r.hash === hash);
+    if (!row) return;
+    const parent = row.kind === "stash" ? row.stash.base || null : row.commit.parents[0] ?? null;
+    const entry = { state: "loading" }, context = this.context, { root, on } = d;
+    this.setDetail(key, entry);
+    cx.spawn(async (cx) => {
+      let result;
+      try {
+        const [info, num, names] = await Promise.all([
+          git(root, on, commitInfoArgs(hash)), git(root, on, commitFilesArgs(hash, parent)), git(root, on, commitStatusArgs(hash, parent)),
+        ]);
+        for (const r of [info, num, names]) if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `git exited ${r.code}`);
+        result = { state: "ready", info: parseCommitInfo(info.stdout), files: commitFiles(parseNumstat(num.stdout), parseNameStatus(names.stdout)), parent };
+      } catch (e) {
+        result = { state: "error", error: String(e?.message ?? e) };
+      }
+      if (this.details.get(key) !== entry) return;
+      // Stale: another location or repo, or the row was collapsed meanwhile. Drop it.
+      if (!this.current(context) || this.data?.key !== repoKey || this.repo(repoKey).expanded !== hash) { this.details.delete(key); return; }
+      this.setDetail(key, result);
+      cx.notify();
+    });
+  }
+
+  /** Expand a row (collapsing any other), or collapse it if it is the open one. */
+  toggle(hash) {
+    const d = this.data;
+    if (!d) return;
+    const s = this.repo(d.key);
+    s.selected = hash;
+    s.expanded = s.expanded === hash ? null : hash;
+    // A failed load is retried when the row is opened again.
+    const key = s.expanded && this.detailKey(d.key, s.expanded);
+    if (key && this.details.get(key)?.state === "error") this.details.delete(key);
+  }
+
+  /** Task 10 replaces this with the diff pane. */
+  openDiff(target) {
+    console.log("git-graph openDiff", JSON.stringify(target));
+  }
+
+  /** Task 9 (Find) fills this in. */
+  focusFind() {}
+
+  /** A click anywhere in the list, by item key. */
+  click(key, cx) {
+    const d = this.data;
+    if (!d) return;
+    const items = this.items(), item = items[this.indexOf(key)];
+    if (!item) return;
+    const s = this.repo(d.key);
+    this.handle.focus();
+    if (item.part === "row") this.toggle(key);
+    else if (item.part === "hash") {
+      cx.write_to_clipboard(item.hash);
+      this.copied = key;
+      cx.timer.after(1500, (cx) => { if (this.copied === key) { this.copied = null; cx.notify(); } });
+    } else if (item.part === "parent") {
+      const i = this.indexOf(item.hash);
+      if (i >= 0) { s.selected = item.hash; s.scroll.scroll_to_item(i, "center"); this.moved(cx); }
+    } else if (item.part === "file") {
+      const det = this.details.get(this.detailKey(d.key, s.expanded));
+      if (det?.state === "ready") this.openDiff(commitTarget(d.root, d.on, det.info.hash, det.parent, item.file));
+    } else if (item.part === "ufile") this.openDiff(uncommittedTarget(d.root, d.on, item.file));
+    else return;
+    cx.notify();
+  }
+
+  /** ↑/↓: select the previous/next graph row and bring it on screen. */
+  move(delta, cx) {
+    const d = this.data;
+    if (!d) return;
+    const items = this.items(), s = this.repo(d.key);
+    let i = s.selected ? this.indexOf(s.selected) : -1;
+    if (i < 0) i = delta > 0 ? Math.max(0, this.range.start) - 1 : Math.min(items.length, this.range.end);
+    for (let j = i + delta; j >= 0 && j < items.length; j += delta) {
+      if (items[j].part !== "row") continue;
+      s.selected = items[j].key;
+      this.reveal(j, s);
+      break;
+    }
+    this.moved(cx);
+  }
+
+  /** Scroll only as far as needed to show item `i` whole. */
+  reveal(i, s) {
+    const { start, end } = this.range;
+    if (i <= start) { s.scroll.scroll_to_item(i, "top"); return; }
+    if (i < end - 1) return;
+    const items = this.items();
+    let top = i, h = items[i].size;
+    while (top > 0 && h + items[top - 1].size <= this.viewH) h += items[--top].size;
+    s.scroll.scroll_to_item(top, "top");
+  }
+
+  /** A keyboard action by name; false when it did nothing (so the key can go on). */
+  command(c, cx) {
+    const d = this.status === "ready" ? this.data : null;
+    if (!d) return false;
+    const s = this.repo(d.key);
+    if (c === "up") this.move(-1, cx);
+    else if (c === "down") this.move(1, cx);
+    else if (c === "toggle") { if (!s.selected) return false; this.toggle(s.selected); }
+    else if (c === "collapse") { if (!s.expanded) return false; s.expanded = null; }
+    else if (c === "find") this.focusFind();
+    else return false;
+    return true;
+  }
+
+  key(e, cx) {
+    const c = e.keystroke === "up" ? "up" : e.keystroke === "down" ? "down" : e.keystroke === "enter" ? "toggle"
+      : e.keystroke === "escape" ? "collapse" : e.key === "/" || e.key_char === "/" ? "find" : null;
+    if (!c || !this.command(c, cx)) return;
+    cx.stop_propagation();
+    cx.notify();
   }
 
   /** Scrolled to the end with more history: load another page. */
@@ -148,7 +326,7 @@ export class Panel {
       .child(div().truncate().child(c.label));
   }
 
-  row(r, t, cols, now, mono) {
+  row(r, t, cols, now, mono, s) {
     const d = this.data;
     let subject, author = "", date = 0, hash = "", dim = false, chips = [];
     if (r.kind === "uncommitted") {
@@ -161,7 +339,10 @@ export class Panel {
       subject = c.subject; author = c.author; date = c.date; hash = c.hash.slice(0, 7);
       dim = c.parents.length > 1; chips = this.chips.get(c.hash) ?? [];
     }
-    return h_flex().w_full().h(ROW_HEIGHT).flex_none().items_center().pr(10).hover((s) => s.bg(t.hover))
+    const selected = s.selected === r.hash, open = s.expanded === r.hash;
+    return h_flex().w_full().h(ROW_HEIGHT).flex_none().items_center().pr(10)
+      .when(selected, (e) => e.bg(t.selected)).when(open && !selected, (e) => e.bg(t.surface))
+      .hover((st) => st.bg(selected ? t.selected : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
         .children(chips.map((c) => this.chip(c, t)))
@@ -184,11 +365,15 @@ export class Panel {
     const d = this.data, items = this.items(), s = this.repo(d.key);
     const cols = visibleColumns(this.width), now = Date.now() / 1000, mono = settings().font_family ?? "JetBrains Mono";
     const id = "graph-rows";
+    const sizes = items.map((it) => it.size);
+    if (d.more) sizes.push(ROW_HEIGHT);
+    const detail = { t, mono, indent: this.graphW + 8, rows: this.itemCache.rows, copied: this.copied };
     return div().id("graph-list").flex_1().min_h(0).relative()
+      .on_size_change((size) => { this.viewH = size.height; })
       .on_scroll_wheel((_e, cx) => this.moved(cx))
       .on_mouse_up("left", (_e, cx) => this.moved(cx))
-      .child(v_virtual_list(id, items.length + (d.more ? 1 : 0), ROW_HEIGHT,
-        (i) => items[i]?.hash ?? "more",
+      .child(v_virtual_list(id, sizes.length, sizes,
+        (i) => items[i]?.key ?? "more",
         (range, cx) => {
           this.range = range;
           // Scrolling (wheel or scrollbar) lays the list out again without a render: when the
@@ -196,11 +381,13 @@ export class Panel {
           this.autoMore(cx);
           const out = [];
           for (let i = range.start; i < range.end; i++) {
-            out.push(i < items.length ? this.row(items[i], t, cols, now, mono)
-              : div().h(ROW_HEIGHT).flex_none().px(12).flex().items_center().text_color(t.dim).child("Loading more commits…"));
+            const it = items[i];
+            out.push(!it ? div().h(ROW_HEIGHT).flex_none().px(12).flex().items_center().text_color(t.dim).child("Loading more commits…")
+              : it.part === "row" ? this.row(it.row, t, cols, now, mono, s)
+              : detailElement(it, detail));
           }
           return out;
-        }).track_scroll(s.scroll).size_full())
+        }).track_scroll(s.scroll).size_full().on_item_click((key, cx) => this.click(key, cx)))
       .child(Scrollbar.vertical(id).viewport_from_layout().absolute().inset_0());
   }
 
@@ -214,10 +401,12 @@ export class Panel {
     // The list's own scrolling may swallow the wheel event that reached the end: whenever a
     // render sees the trailing row on screen, check again after this frame.
     this.autoMore(cx);
+    this.ensureDetail(cx);
     const t = theme(), d = this.status === "ready" ? this.data : null;
     const branch = d ? (d.head ?? d.headHash.slice(0, 7)) : "";
     return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13)
+      .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .on_size_change((size, cx) => { if (size.width !== this.width) { this.width = size.width; cx.notify(); } })
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .child(div().font_semibold().child("Graph"))

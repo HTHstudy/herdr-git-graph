@@ -6,6 +6,7 @@
  * @typedef {{hash: string, base: string, selector: string, date: number, subject: string}} Stash
  * @typedef {{path: string, from: string|null, staged: string|null, unstaged: string|null, untracked: boolean, conflict: boolean}} StatusEntry
  * @typedef {{path: string, from: string|null, added: number|null, deleted: number|null}} FileChange
+ * @typedef {{path: string, from: string|null, status: string}} NameStatus
  * @typedef {Commit & {committer: string, committerEmail: string, committerDate: number, body: string}} CommitInfo
  */
 
@@ -112,6 +113,24 @@ export function parseNumstat(stdout) {
     } else {
       out.push({ path, from: null, added: num(a), deleted: num(d) });
     }
+  }
+  return out;
+}
+
+/**
+ * `--name-status -z` output: one letter per file (R/C scores dropped); renames carry `from`.
+ * @returns {NameStatus[]}
+ */
+export function parseNameStatus(stdout) {
+  const toks = String(stdout ?? "").split("\0");
+  const out = [];
+  for (let i = 0; i < toks.length; i++) {
+    const m = /^([ACDMRTUXB])\d*$/.exec(toks[i]);
+    if (!m) continue; // blanks and diff-tree's leading commit id
+    if (m[1] === "R" || m[1] === "C") {
+      const from = toks[++i] ?? "";
+      out.push({ path: toks[++i] ?? "", from, status: m[1] });
+    } else out.push({ path: toks[++i] ?? "", from: null, status: m[1] });
   }
   return out;
 }
