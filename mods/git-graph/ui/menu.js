@@ -10,16 +10,20 @@ import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay, openOverlay, theme, run, notify, setShared } from "herdr";
 import { menuFor, dialogFor, planFor } from "../lib/actions.js";
 import { actionLabel } from "../lib/run.js";
-import { dialogHeight } from "../lib/targets.js";
+import { dialogHeight, targetTitle } from "../lib/targets.js";
 
 export const DIALOG_WIDTH = 440;
 
 /**
  * Hand work to the Graph panel copy `owner` (overlays can't run long tasks: theirs stop
- * when they close). `git-graph.request` = {id, owner, root, on, run?: {label, plan}, unselect?: name}.
+ * when they close). `git-graph.request` = {id, at, owner, root, on, run?: {label, plan}, unselect?: name}.
+ * The owner ignores a request older than REQUEST_TTL (10 s): nothing runs late. The sender has
+ * closed by then and can't know whether it was picked up, so it only logs what it sent.
  */
 export function request(m, body) {
-  setShared("git-graph.request", { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, owner: m.owner, root: m.root, on: m.on, ...body });
+  const req = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, at: Date.now(), owner: m.owner, root: m.root, on: m.on, ...body };
+  console.log("git-graph: request", req.id, body.run ? body.run.label : `unselect ${body.unselect}`);
+  setShared("git-graph.request", req);
 }
 
 /** Open the dialog overlay for an action (props().dialog = {...menu props, id, label}). */
@@ -79,7 +83,7 @@ export class Menu {
     const pos = Math.max(0, ch.indexOf(this.at));
     if (e.key === "down") this.at = ch[(pos + 1) % ch.length];
     else if (e.key === "up") this.at = ch[(pos + ch.length - 1) % ch.length];
-    else if (e.key === "enter") this.choose(list[ch[pos]], cx);
+    else if (e.key === "enter") { if (e.is_held) return; this.choose(list[ch[pos]], cx); } // a held ⏎ must not run on
     else if (e.key === "escape") closeOverlay(props()?.overlay);
     else return;
     cx.stop_propagation();
@@ -91,6 +95,8 @@ export class Menu {
     if (!ch.includes(this.at) && ch.length) this.at = ch[0];
     return v_flex().id("gg-menu").track_focus(this.handle).w_full().min_h(0).p(5).bg(t.popover).text_size(12.8)
       .on_key_down((e, cx) => this.key(e, cx))
+      .child(div().h(26).flex_none().px(8).flex().items_center().text_size(11.5).text_color(t.dim)
+        .child(div().min_w(0).truncate().child(targetTitle(this.m().target))))
       .children(list.map((it, i) => it === "sep"
         ? div().mx(7).my(4).h(1).flex_none().bg(t.border)
         : h_flex().id(`gg-mi-${i}`).h(31).flex_none().px(8).gap(9).rounded(7).items_center().text_color(t.foreground)

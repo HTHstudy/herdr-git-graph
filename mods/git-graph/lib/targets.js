@@ -48,11 +48,27 @@ export function menuCtx(data, filter) {
   return { head: data.head ?? null, remotes: [...data.remotes], filtered: (filter ?? []).map(shortRef) };
 }
 
-/** Pixel height of a menu popup (rows 31, separators 9, padding 5 each side). */
-export function menuHeight(items) {
-  let h = 10;
+/** Pixel height of a menu popup (rows 31, separators 9, padding 5 each side, title 26). */
+export function menuHeight(items, title = false) {
+  let h = 10 + (title ? 26 : 0);
   for (const it of items) h += it === "sep" ? 9 : 31;
   return h;
+}
+
+/**
+ * The menu's title line naming what was right-clicked.
+ * @param {any} t Target
+ */
+export function targetTitle(t) {
+  switch (t?.kind) {
+    case "commit": return `commit ${t.hash.slice(0, 7)} · ${t.subject}`;
+    case "branch": return `branch ${t.name}`;
+    case "remote": return `remote ${t.name}`;
+    case "tag": return `tag ${t.name}`;
+    case "stash": return t.selector;
+    case "uncommitted": return "Uncommitted changes";
+    default: return "";
+  }
 }
 
 /** Text fields that may stay empty (everything else typed is required). */

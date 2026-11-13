@@ -7,9 +7,10 @@ import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
 import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipAt } from "../lib/format.js";
-import { menuFor } from "../lib/actions.js";
+import { menuFor, dropChecks } from "../lib/actions.js";
+import { requestState } from "../lib/run.js";
 import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
-import { runPlan } from "./run.js";
+import { runPlan, failedGuard } from "./run.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
@@ -320,15 +321,27 @@ export class Panel {
       const chip = chipAt(this.chips.get(r.hash) ?? [], e.local_position?.x ?? -1, this.graphW);
       if (chip?.ref) target = refTarget(chip.ref, d.remotes);
     }
-    const ctx = menuCtx(d, s.branches), list = menuFor(target, ctx);
-    if (!list.length) return;
+    const ctx = menuCtx(d, s.branches);
     s.selected = r.hash;
-    openOverlay({
-      mod: "git-graph", kind: "popup", width: 290, height: menuHeight(list),
-      props: { menu: { owner: this.uid, root: d.root, on: d.on, target, ctx } },
-    });
     cx.stop_propagation();
     cx.notify();
+    const open = (ctx) => {
+      const list = menuFor(target, ctx);
+      if (!list.length) return;
+      openOverlay({
+        mod: "git-graph", kind: "popup", width: 290, height: menuHeight(list, true),
+        props: { menu: { owner: this.uid, root: d.root, on: d.on, target, ctx } },
+      });
+    };
+    // Drop is offered only for a commit on the current branch with no merge after it: ask git
+    // first (the same checks run again as guards right before the rebase).
+    // Any newer right-click wins over a check still in flight.
+    const gen = this.menuGen = (this.menuGen ?? 0) + 1, { root, on } = d;
+    if (target.kind !== "commit" || target.parents.length !== 1 || ctx.head === null) { open(ctx); return; }
+    cx.spawn(async () => {
+      const dropable = (await failedGuard(root, on, dropChecks(target.hash)).catch(() => "error")) === null;
+      if (this.menuGen === gen) open({ ...ctx, dropable });
+    });
   }
 
   /**
@@ -338,8 +351,10 @@ export class Panel {
    */
   request(cx) {
     const req = shared("git-graph.request");
-    if (!req || req.owner !== this.uid || req.id === this.seenRequest) return;
+    const state = requestState(req, this.uid, this.seenRequest, Date.now());
+    if (state === "skip") return;
     this.seenRequest = req.id;
+    if (state === "stale") { console.log("git-graph: ignored a stale request", JSON.stringify(req)); return; }
     if (req.run) {
       cx.spawn(async (cx) => { await runPlan(req.root, req.on, req.run.label, req.run.plan, cx); cx.notify(); });
     } else if (req.unselect) {

@@ -20,12 +20,14 @@ const unc = { kind: "uncommitted" };
 const ids = (m) => m.map((i) => (i === "sep" ? "sep" : i.id));
 
 test("menuFor commit", () => {
-  assert.deepEqual(ids(menuFor(commit, ctx)), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "drop", "sep",
+  assert.deepEqual(ids(menuFor(commit, { ...ctx, dropable: true })), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "drop", "sep",
     "merge", "rebase", "reset", "sep", "copyHash", "copySubject"]);
+  assert.ok(!ids(menuFor(commit, ctx)).includes("drop"), "Drop needs the right-click check (ctx.dropable)");
+  assert.ok(!ids(menuFor(commit, { ...ctx, dropable: false })).includes("drop"));
   assert.equal(menuFor(commit, ctx)[0].label, "Add Tag…");
   assert.deepEqual(ids(menuFor(commit, { ...ctx, head: null })), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "sep", "copyHash", "copySubject"]);
-  assert.ok(!ids(menuFor(mergeC, ctx)).includes("drop"));
-  assert.ok(!ids(menuFor(rootC, ctx)).includes("drop"));
+  assert.ok(!ids(menuFor(mergeC, { ...ctx, dropable: true })).includes("drop"));
+  assert.ok(!ids(menuFor(rootC, { ...ctx, dropable: true })).includes("drop"));
 });
 
 test("menuFor branch / remote / tag / uncommitted / stash", () => {
@@ -303,4 +305,73 @@ test("int: archive zip", async () => {
   assert.ok(existsSync(join(folder, "main.zip")));
   run(d, planFor("archive", { kind: "tag", name: "v1.1", annotated: true, hash: "" }, { format: "tar", name: "t.tar", folder }, c));
   assert.ok(existsSync(join(folder, "t.tar")));
+});
+
+// ---- guards (review fixes 1 and 6) -----------------------------------------
+
+import { spawnSync } from "node:child_process";
+import { guardPasses, guardMessage } from "../mods/git-graph/lib/run.js";
+import { dropChecks, headGuard } from "../mods/git-graph/lib/actions.js";
+
+/** The first failing guard's message (as runPlan would show it), or null. */
+function checkGuards(dir, guards) {
+  for (const g of guards ?? []) {
+    const r = spawnSync("git", g.argv, { cwd: dir, encoding: "utf8" });
+    const res = { code: r.status, stdout: r.stdout };
+    if (!guardPasses(g, res)) return guardMessage(g, res);
+  }
+  return null;
+}
+
+test("guards: which plans carry them", () => {
+  const head = headGuard("main");
+  for (const [id, t] of [["reset", commit], ["merge", commit], ["mergeBranch", branch], ["rebase", commit],
+    ["rebaseOnBranch", branch], ["pullBranch", remote], ["drop", commit]]) {
+    const g = planFor(id, t, { mode: "hard" }, ctx).guards;
+    assert.deepEqual(g.at(-1), head, id);
+  }
+  assert.deepEqual(planFor("drop", commit, {}, ctx).guards.slice(0, 2), dropChecks(H));
+  for (const id of ["cherryPick", "checkout", "deleteBranch", "stashDrop"]) {
+    const t = id === "deleteBranch" ? branch : id === "stashDrop" ? stash : commit;
+    assert.equal(planFor(id, t, {}, ctx).guards, undefined, id);
+  }
+  assert.deepEqual(head.argv.slice(-4), ["symbolic-ref", "--short", "-q", "HEAD"]);
+});
+
+test("guardPasses / guardMessage", () => {
+  assert.equal(guardPasses({ expect: "ok" }, { code: 0, stdout: "" }), true);
+  assert.equal(guardPasses({ expect: "ok" }, { code: 1, stdout: "" }), false);
+  assert.equal(guardPasses({ expect: "empty" }, { code: 0, stdout: "\n" }), true);
+  assert.equal(guardPasses({ expect: "empty" }, { code: 0, stdout: "abc\n" }), false);
+  assert.equal(guardPasses({ expect: { equals: "main" } }, { code: 0, stdout: "main\n" }), true);
+  assert.equal(guardPasses({ expect: { equals: "main" } }, { code: 0, stdout: "topic\n" }), false);
+  assert.equal(guardMessage(headGuard("main"), { stdout: "topic\n" }), "Current branch changed to topic — reopen the menu.");
+  assert.equal(guardMessage(headGuard("main"), { stdout: "" }), "Current branch changed to detached HEAD — reopen the menu.");
+});
+
+test("int: drop checks — off-branch commit and commit before a merge are refused, main untouched", async () => {
+  const { d, c, cm } = await fx();
+  const before = rev(d, "main");
+  // topic 1 is not on main: the reviewer's repro (main would have been rebuilt on top of it).
+  assert.match(checkGuards(d, planFor("drop", cm("topic 1"), {}, c).guards), /not on the current branch/);
+  // main work lies before the merge of feature/x: a plain rebase would flatten it.
+  assert.match(checkGuards(d, planFor("drop", cm("main work"), {}, c).guards), /merge commit follows/);
+  assert.equal(rev(d, "main"), before);
+  // the newest commit on main, with nothing merged after it: allowed, and the drop works.
+  const p = planFor("drop", cm("rename"), {}, c);
+  assert.equal(checkGuards(d, p.guards), null);
+  run(d, p);
+  assert.ok(!git(d, "log", "--format=%s").split("\n").includes("rename"));
+});
+
+test("int: head guard — a branch switch after the dialog opened blocks reset", async () => {
+  const { d, c, cm } = await fx();
+  const p = planFor("reset", cm("add a"), { mode: "hard" }, c);
+  assert.equal(checkGuards(d, p.guards), null);
+  git(d, "checkout", "-q", "topic");
+  const topicBefore = rev(d, "topic");
+  assert.equal(checkGuards(d, p.guards), "Current branch changed to topic — reopen the menu.");
+  assert.equal(rev(d, "topic"), topicBefore, "nothing ran");
+  git(d, "checkout", "-q", "--detach", "main");
+  assert.match(checkGuards(d, p.guards), /detached HEAD/);
 });

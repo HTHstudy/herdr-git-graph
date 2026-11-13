@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixture, git } from "./helpers.mjs";
 import { execFileSync } from "node:child_process";
 import {
-  rowTarget, refTarget, splitRemote, menuCtx, menuHeight, missingFields, cleanValues, initialValues,
+  rowTarget, refTarget, splitRemote, menuCtx, menuHeight, targetTitle, missingFields, cleanValues, initialValues,
   dialogHeight, tagDetailsArgs, parseTagDetails,
 } from "../mods/git-graph/lib/targets.js";
 import { menuFor, dialogFor } from "../mods/git-graph/lib/actions.js";
@@ -40,6 +40,16 @@ test("menuCtx: short names in `filtered`, so Unselect shows for a filtered branc
 
 test("menuHeight: rows 31, separators 9, padding 10", () => {
   assert.equal(menuHeight([{ id: "a" }, "sep", { id: "b" }]), 10 + 31 + 9 + 31);
+  assert.equal(menuHeight([{ id: "a" }], true), 10 + 26 + 31);
+});
+
+test("targetTitle names what was right-clicked", () => {
+  assert.equal(targetTitle({ kind: "commit", hash: "6acef63" + "0".repeat(33), parents: [], subject: "Merge feature/x" }), "commit 6acef63 · Merge feature/x");
+  assert.equal(targetTitle({ kind: "branch", name: "topic", current: false }), "branch topic");
+  assert.equal(targetTitle({ kind: "remote", name: "origin/x", remote: "origin", branch: "x" }), "remote origin/x");
+  assert.equal(targetTitle({ kind: "tag", name: "v1.1", annotated: true, hash: "" }), "tag v1.1");
+  assert.equal(targetTitle({ kind: "stash", selector: "stash@{0}", hash: "" }), "stash@{0}");
+  assert.equal(targetTitle({ kind: "uncommitted" }), "Uncommitted changes");
 });
 
 test("dialog form: required text, trimming, initial values, height", () => {

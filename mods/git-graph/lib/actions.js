@@ -4,7 +4,15 @@
 // Target = {kind:"commit",hash,parents,subject} | {kind:"branch",name,current}
 //        | {kind:"remote",name,remote,branch} | {kind:"tag",name,annotated,hash}
 //        | {kind:"stash",selector,hash} | {kind:"uncommitted"}
-// Ctx    = {head: string|null, remotes: string[], filtered: string[]}
+// Ctx    = {head: string|null, remotes: string[], filtered: string[], dropable?: boolean}
+//          dropable: the right-clicked commit is reachable from HEAD with no merge commit
+//          between it and HEAD (checked at right-click; see dropChecks). Drop needs it true.
+// Plan   = {steps: string[][], guards?: Guard[]} | {copy} | {ui, arg?}
+// Guard  = {argv: string[], expect: "ok"|"empty"|{equals: string}, message: string}: git argv
+//          (no "git") run before any step; one that fails aborts the plan with `message`
+//          ("{out}" in it is replaced by the guard's trimmed output).
+
+import { READ } from "./git.js";
 
 const M = (id, label) => ({ id, label });
 const SEP = "sep";
@@ -33,7 +41,7 @@ export function menuFor(target, ctx) {
   switch (target.kind) {
     case "commit": {
       const attached = ctx.head !== null;
-      const droppable = attached && target.parents.length === 1;
+      const droppable = attached && target.parents.length === 1 && ctx.dropable === true;
       return tidy([
         M("addTag", "Add Tag…"), M("createBranch", "Create Branch…"), SEP,
         M("checkout", "Checkout…"), M("cherryPick", "Cherry Pick…"), M("revert", "Revert…"),
@@ -224,8 +232,36 @@ export function dialogFor(id, t, ctx) {
 
 // ---- plans -----------------------------------------------------------------
 
+/**
+ * Checks that make Drop safe: the commit is on the current branch, and no merge lies between
+ * it and HEAD (a plain rebase would flatten it). Run at right-click (Ctx.dropable) and again
+ * as guards right before the rebase.
+ * @param {string} hash
+ * @returns {Guard[]}
+ */
+export function dropChecks(hash) {
+  return [
+    { argv: [...READ, "merge-base", "--is-ancestor", hash, "HEAD"], expect: "ok",
+      message: `Commit ${short(hash)} is not on the current branch: nothing was dropped.` },
+    { argv: [...READ, "rev-list", "--merges", `${hash}..HEAD`], expect: "empty",
+      message: `A merge commit follows ${short(hash)} on the current branch: dropping it would flatten the merge. Nothing was dropped.` },
+  ];
+}
+
+/**
+ * The branch the dialog named is still checked out.
+ * @param {string|null} head
+ * @returns {Guard}
+ */
+export function headGuard(head) {
+  return { argv: [...READ, "symbolic-ref", "--short", "-q", "HEAD"], expect: { equals: String(head ?? "") },
+    message: "Current branch changed to {out} — reopen the menu." };
+}
+
 const flags = (pairs) => pairs.filter(([on]) => on).map(([, f]) => f);
 const steps = (...s) => ({ steps: s });
+/** Steps that act on the current branch: guarded so they still act on the branch shown. */
+const onHead = (ctx, plan, extra = []) => ({ ...plan, guards: [...extra, headGuard(ctx.head)] });
 
 /** @returns {Plan} */
 export function planFor(id, t, v, ctx) {
@@ -243,14 +279,14 @@ export function planFor(id, t, v, ctx) {
     case "cherryPick":
       return steps(["cherry-pick", ...parent, ...flags([[v.noCommit, "--no-commit"]]), t.hash]);
     case "revert": return steps(["revert", "--no-edit", ...parent, t.hash]);
-    case "drop": return steps(["rebase", "--onto", `${t.hash}^`, t.hash]);
+    case "drop": return onHead(ctx, steps(["rebase", "--onto", `${t.hash}^`, t.hash]), dropChecks(t.hash));
     case "merge":
     case "mergeBranch":
-      return steps(["merge", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"], [v.noCommit, "--no-commit"]]),
-        t.kind === "commit" ? t.hash : t.name]);
-    case "rebase": return steps(["rebase", t.hash]);
-    case "rebaseOnBranch": return steps(["rebase", t.name]);
-    case "reset": return steps(["reset", `--${v.mode ?? "mixed"}`, t.hash]);
+      return onHead(ctx, steps(["merge", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"], [v.noCommit, "--no-commit"]]),
+        t.kind === "commit" ? t.hash : t.name]));
+    case "rebase": return onHead(ctx, steps(["rebase", t.hash]));
+    case "rebaseOnBranch": return onHead(ctx, steps(["rebase", t.name]));
+    case "reset": return onHead(ctx, steps(["reset", `--${v.mode ?? "mixed"}`, t.hash]));
     case "checkoutBranch": return steps(["checkout", t.name]);
     case "renameBranch": return steps(["branch", "-m", t.name, v.name]);
     case "deleteBranch": return steps(["branch", v.force ? "-D" : "-d", t.name]);
@@ -268,7 +304,7 @@ export function planFor(id, t, v, ctx) {
     case "fetchIntoLocal":
       return steps(["fetch", t.remote, `${v.force ? "+" : ""}${t.branch}:${v.local ?? t.branch}`]);
     case "pullBranch":
-      return steps(["pull", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"]]), t.remote, t.branch]);
+      return onHead(ctx, steps(["pull", ...flags([[v.noFF, "--no-ff"], [v.squash, "--squash"]]), t.remote, t.branch]));
     case "deleteTag": {
       const s = [["tag", "-d", t.name]];
       if (v.remote) s.push(["push", v.remoteName ?? ctx.remotes[0], "--delete", `refs/tags/${t.name}`]);

@@ -28,7 +28,8 @@ export function busyLabel(value, now) {
   return label;
 }
 
-const NETWORK = new Set(["push", "fetch", "pull"]);
+/** Network steps, and archive (a big tree takes a while to write). */
+const NETWORK = new Set(["push", "fetch", "pull", "archive"]);
 
 /** @param {string[]} step git argv without "git" */
 export const stepTimeout = (step) => (NETWORK.has(step[0]) ? NETWORK_TIMEOUT : LOCAL_TIMEOUT);
@@ -53,17 +54,60 @@ export function errorTail(r) {
 export const hasConflicts = (entries) => entries.some((e) => e.conflict);
 
 /**
- * The toasts after a plan ran. A failure that left conflicts (cherry-pick, merge, rebase,
- * revert, stash pop all exit non-zero then) is reported as the conflict, not as an error.
+ * Whether a guard's git result meets its expectation.
+ * @param {{expect: "ok"|"empty"|{equals:string}}} guard
+ * @param {{code:number, stdout?:string}} r
+ */
+export function guardPasses(guard, r) {
+  if (r.code !== 0) return false;
+  const out = String(r.stdout ?? "").trim();
+  if (guard.expect === "ok") return true;
+  if (guard.expect === "empty") return out === "";
+  return typeof guard.expect === "object" && out === guard.expect.equals;
+}
+
+/**
+ * A failed guard's message, "{out}" replaced by its output ("detached HEAD" when none).
+ * @param {{message:string}} guard
+ * @param {{stdout?:string}|null} r
+ */
+export function guardMessage(guard, r) {
+  const out = String(r?.stdout ?? "").trim() || "detached HEAD";
+  return guard.message.replaceAll("{out}", out);
+}
+
+/**
+ * The toasts after a plan ran: a failure always shows its error (stderr tail); conflicts that
+ * appeared during this run (none before it) add the conflict warning.
  * @param {string} label
- * @param {{failed: {code:number, stdout?:string, stderr?:string}|Error|null, conflicts: boolean}} o
+ * @param {{failed: {code:number, stdout?:string, stderr?:string}|Error|null, conflicts: boolean, conflictsBefore?: boolean}} o
  * @returns {{title:string, body:string, level:"error"|"warning"}[]}
  */
-export function outcome(label, { failed, conflicts }) {
-  if (conflicts && failed) return [{ title: "Conflicts", body: "Resolve in nvim or Changes", level: "warning" }];
-  if (!failed) return [];
-  const body = failed instanceof Error ? String(failed.message).slice(-400) : errorTail(failed);
-  return [{ title: `${label} failed`, body, level: "error" }];
+export function outcome(label, { failed, conflicts, conflictsBefore = false }) {
+  const out = [];
+  if (failed) {
+    const body = failed instanceof Error ? String(failed.message).slice(-400) : errorTail(failed);
+    out.push({ title: `${label} failed`, body, level: "error" });
+  }
+  if (conflicts && !conflictsBefore) out.push({ title: "Conflicts", body: "Resolve in nvim or Changes", level: "warning" });
+  return out;
+}
+
+/** A handed-off request older than this is ignored (never run late). */
+export const REQUEST_TTL = 10000;
+
+/**
+ * Whether a `git-graph.request` should be acted on by a panel copy now.
+ * @param {any} req
+ * @param {string} owner this copy's uid
+ * @param {string|null} seen the last request id this copy handled
+ * @param {number} now ms
+ * @returns {"run"|"skip"|"stale"}
+ */
+export function requestState(req, owner, seen, now) {
+  if (!req || req.owner !== owner || req.id === seen) return "skip";
+  if (!Number.isFinite(req.at) || now - req.at > REQUEST_TTL || req.at - now > REQUEST_TTL) return "stale";
+  return "run";
 }
 
 /** "Cherry Pick…" → "Cherry Pick": a menu label as the busy / toast label. */

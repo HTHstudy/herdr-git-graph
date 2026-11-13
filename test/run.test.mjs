@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixture, git, ISOLATED_ENV } from "./helpers.mjs";
-import { busyLabel, busyValue, BUSY_STALE, stepTimeout, envArgv, errorTail, hasConflicts, outcome, actionLabel } from "../mods/git-graph/lib/run.js";
+import { busyLabel, busyValue, BUSY_STALE, stepTimeout, envArgv, errorTail, hasConflicts, outcome, actionLabel, requestState, REQUEST_TTL } from "../mods/git-graph/lib/run.js";
 import { planFor } from "../mods/git-graph/lib/actions.js";
 import { statusArgs } from "../mods/git-graph/lib/git.js";
 import { parseStatus } from "../mods/git-graph/lib/parse.js";
@@ -51,8 +51,26 @@ test("hasConflicts / outcome", () => {
   assert.deepEqual(outcome("Fetch", { failed: new Error("timed out"), conflicts: false }),
     [{ title: "Fetch failed", body: "timed out", level: "error" }]);
   assert.deepEqual(outcome("Cherry Pick", { failed: { code: 1, stderr: "error: could not apply" }, conflicts: true }),
-    [{ title: "Conflicts", body: "Resolve in nvim or Changes", level: "warning" }]);
-  assert.deepEqual(outcome("Fetch", { failed: null, conflicts: true }), [], "a conflict already there is not this action's news");
+    [{ title: "Cherry Pick failed", body: "error: could not apply", level: "error" },
+      { title: "Conflicts", body: "Resolve in nvim or Changes", level: "warning" }], "the error stays visible beside the conflict");
+  assert.deepEqual(outcome("Merge", { failed: { code: 128, stderr: "fatal: You have not concluded your merge" }, conflicts: true, conflictsBefore: true }),
+    [{ title: "Merge failed", body: "fatal: You have not concluded your merge", level: "error" }], "old conflicts don't hide the real error");
+  assert.deepEqual(outcome("Fetch", { failed: null, conflicts: true, conflictsBefore: true }), []);
+});
+
+test("requestState: owner, once, and never late", () => {
+  const now = 1_000_000;
+  const req = { id: "a", owner: "me", at: now - 1000 };
+  assert.equal(requestState(req, "me", null, now), "run");
+  assert.equal(requestState(req, "you", null, now), "skip");
+  assert.equal(requestState(req, "me", "a", now), "skip");
+  assert.equal(requestState(null, "me", null, now), "skip");
+  assert.equal(requestState({ ...req, at: now - REQUEST_TTL - 1 }, "me", null, now), "stale");
+  assert.equal(requestState({ id: "b", owner: "me" }, "me", null, now), "stale");
+});
+
+test("stepTimeout: archive is long", () => {
+  assert.equal(stepTimeout(["archive", "--format=zip", "-o", "/x/a.zip", "main"]), 120000);
 });
 
 test("actionLabel drops the trailing ellipsis", () => {
@@ -74,5 +92,5 @@ test("a cherry-pick conflict through envArgv: non-zero exit, no hang, conflict s
   const st = spawnSync("git", statusArgs(), { cwd: d, env, encoding: "utf8" });
   const conflicts = hasConflicts(parseStatus(st.stdout));
   assert.equal(conflicts, true);
-  assert.deepEqual(outcome("Cherry Pick", { failed: { code: r.status, stderr: r.stderr }, conflicts }).map((n) => n.title), ["Conflicts"]);
+  assert.deepEqual(outcome("Cherry Pick", { failed: { code: r.status, stderr: r.stderr }, conflicts }).map((n) => n.title), ["Cherry Pick failed", "Conflicts"]);
 });
