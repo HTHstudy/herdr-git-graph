@@ -6,7 +6,7 @@ import { parseDiff, sideBySide } from "./diff.js";
  * @typedef {import("./diff.js").DLine} DLine
  * @typedef {{key:string, type:"hunk", text:string}
  *   | {key:string, type:"line", line:DLine}
- *   | {key:string, type:"pair", left:DLine|null, right:DLine|null}
+ *   | {key:string, type:"pair", left:DLine|null, right:DLine|null, leftNo:number|null, rightNo:number|null}
  *   | {key:string, type:"notice", text:string}} DiffRow
  */
 
@@ -71,7 +71,8 @@ export function diffRows(d, mode, from = null) {
     let h = -1, n = 0;
     for (const r of sideBySide(d.hunks)) {
       if (r.header !== undefined) { h++; n = 0; rows.push({ key: `h${h}`, type: "hunk", text: r.header }); }
-      else rows.push({ key: `h${h}.${n++}`, type: "pair", left: show(r.left), right: show(r.right) });
+      // A context line is one DLine on both sides: the left gutter shows its old number, the right its new.
+      else rows.push({ key: `h${h}.${n++}`, type: "pair", left: show(r.left), right: show(r.right), leftNo: r.left?.old ?? null, rightNo: r.right?.new ?? null });
     }
   } else {
     d.hunks.forEach((hunk, h) => {
@@ -101,6 +102,27 @@ export function diffPaneOf(list, tab, stored) {
 export function newDiffPane(list, tab, before) {
   const old = new Set(before);
   return list.find((p) => isDiffPane(p, tab) && !old.has(p.pane))?.pane ?? null;
+}
+
+/**
+ * The tab's diff pane, if it has one: the recorded id while valid; else (stale or missing record)
+ * any git-graph pane of the tab other than the focused one (the focused one is the Graph panel
+ * when it is itself a pane). Null: split a new one.
+ */
+export function existingDiffPane(list, tab, stored, focusedPane) {
+  return diffPaneOf(list, tab, stored) ?? list.find((p) => isDiffPane(p, tab) && p.pane !== focusedPane)?.pane ?? null;
+}
+
+/**
+ * Which pane to split the diff pane from: the focused pane when it is a model pane of the tab and
+ * not a git-graph one; else the tab's focused pane; else its first non-mod pane; null when none.
+ */
+export function splitFrom(list, tab, focusedPane) {
+  const ok = (p) => p.tab === tab && p.mod !== "git-graph";
+  return list.find((p) => p.pane === focusedPane && ok(p))?.pane
+    ?? list.find((p) => p.focused && ok(p))?.pane
+    ?? list.find((p) => p.tab === tab && !p.mod)?.pane
+    ?? null;
 }
 
 /** The tab's git-graph panes' ids (taken before a split). */

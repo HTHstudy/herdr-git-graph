@@ -8,7 +8,7 @@ import { diffArgs } from "../lib/diff.js";
 import { sameTarget, targetLabel, absPath, diffOutcome, diffRows, gutterDigits, diffPaneOf, gitGraphPanes } from "../lib/diffview.js";
 
 const LINE = 20;
-const diffKey = (tab) => "git-graph.diff." + tab;
+export const diffKey = (tab) => "git-graph.diff." + tab;
 export const paneKey = (tab) => "git-graph.diffPane." + tab;
 const nvimBin = () => `${appHome()}/mods/herdr-nvim/bin/herdr-nvim`;
 
@@ -17,7 +17,7 @@ export class DiffPane {
     this.tab = props.diff.tab;
     /** The target the shown result belongs to, and its load state. */
     this.target = null; this.state = "empty"; this.result = null; this.error = null;
-    this.rowsCache = null; this.loadGen = 0;
+    this.rowsCache = null; this.loadGen = 0; this.grabbed = false;
     this.scroll = VirtualListScrollHandle.new();
     this.handle = cx.focus_handle();
     this.nvim = false;
@@ -52,6 +52,18 @@ export class DiffPane {
     return f && gitGraphPanes(list, this.tab).includes(f) ? f : null;
   }
 
+  /**
+   * Once a target has loaded and the app's focused pane is this one (just split in, or adopted),
+   * take the keyboard so Esc works without a click first. Once per target.
+   */
+  grab(cx) {
+    if (this.grabbed || this.state === "loading" || this.state === "empty") return;
+    const mine = diffPaneOf(panes(), this.tab, shared(paneKey(this.tab)));
+    if (!mine || focused()?.pane !== mine) return;
+    this.grabbed = true;
+    cx.spawn(async () => { this.handle.focus(); });
+  }
+
   close() {
     const pane = this.paneId();
     if (pane) run("pane.close", { pane });
@@ -59,7 +71,7 @@ export class DiffPane {
 
   /** The shared target changed: load it; a result for an older target is dropped. */
   load(target, cx) {
-    this.target = target; this.result = null; this.error = null; this.rowsCache = null;
+    this.target = target; this.result = null; this.error = null; this.rowsCache = null; this.grabbed = false;
     this.state = target ? "loading" : "empty";
     const gen = ++this.loadGen;
     if (!target) return;
@@ -129,14 +141,14 @@ export class DiffPane {
     return div().p(14).text_size(13).text_color(color ?? t.dim).child(text);
   }
 
-  /** One side of a line: old/new gutters (unified) or one gutter (split), then the text, on the line's color. */
-  cell(l, t, o, gutters) {
+  /** One side of a line: its gutter numbers (old/new unified, one per side split), then the text, on the line's color. */
+  cell(l, t, o, nums) {
     const bg = !l ? t.surface : l.kind === "+" ? t.ansi2 + "22" : l.kind === "-" ? t.ansi1 + "22" : null;
     const num = (n) => div().w(o.numW).flex_none().pr(6).text_right().text_color(t.dim).child(n == null ? "" : String(n));
     const sign = l ? (l.kind === " " ? " " : l.kind) : "";
     const signColor = l?.kind === "+" ? t.ansi2 : l?.kind === "-" ? t.ansi1 : t.dim;
     return h_flex().flex_1().min_w(0).h(LINE).items_center().overflow_hidden().when(Boolean(bg), (e) => e.bg(bg))
-      .children(gutters === 2 ? [num(l?.old), num(l?.new)] : [num(l ? (l.kind === "+" ? l.new : l.old) : null)])
+      .children(nums.map(num))
       .child(div().w(14).flex_none().text_color(signColor).child(sign))
       .child(div().flex_1().min_w(0).whitespace_nowrap().overflow_hidden().child(l ? l.text || " " : ""));
   }
@@ -145,8 +157,8 @@ export class DiffPane {
     const base = h_flex().w_full().h(LINE).flex_none().items_center();
     if (r.type === "hunk") return base.px(8).bg(t.surface).text_color(t.dim).child(div().truncate().child(r.text));
     if (r.type === "notice") return base.px(12).text_color(t.dim).child(r.text);
-    if (r.type === "line") return base.child(this.cell(r.line, t, o, 2));
-    return base.child(this.cell(r.left, t, o, 1)).child(div().w(1).h_full().flex_none().bg(t.border)).child(this.cell(r.right, t, o, 1));
+    if (r.type === "line") return base.child(this.cell(r.line, t, o, [r.line.old, r.line.new]));
+    return base.child(this.cell(r.left, t, o, [r.leftNo])).child(div().w(1).h_full().flex_none().bg(t.border)).child(this.cell(r.right, t, o, [r.rightNo]));
   }
 
   body(t, mode) {
@@ -171,6 +183,7 @@ export class DiffPane {
   render(cx) {
     const target = shared(diffKey(this.tab)) ?? null;
     if (!sameTarget(target, this.target)) this.load(target, cx);
+    this.grab(cx);
     const t = theme(), mode = shared("git-graph.diffMode") === "split" ? "split" : "unified";
     return v_flex().id("git-graph-diff").size_full().min_h(0).overflow_hidden().bg(t.background).text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))

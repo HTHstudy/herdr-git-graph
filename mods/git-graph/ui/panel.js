@@ -1,7 +1,7 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
-import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run } from "herdr";
+import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run, notify } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
@@ -10,8 +10,8 @@ import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/forma
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
-import { diffPaneOf, newDiffPane, gitGraphPanes } from "../lib/diffview.js";
-import { paneKey } from "./diff-pane.js";
+import { existingDiffPane, splitFrom, newDiffPane, gitGraphPanes } from "../lib/diffview.js";
+import { paneKey, diffKey } from "./diff-pane.js";
 import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
 
 export const ROW_HEIGHT = 26;
@@ -233,16 +233,20 @@ export class Panel {
    * (the pane follows it), and the pane is split in on the right unless the tab has one.
    */
   openDiff(target, cx) {
-    const tab = focused()?.tab; // before any await: the person may switch tabs
+    const f = focused(), tab = f?.tab; // before any await: the person may switch tabs
     if (!tab) return;
-    setShared("git-graph.diff." + tab, target);
-    const list = panes();
-    if (diffPaneOf(list, tab, shared(paneKey(tab)))) return;
+    setShared(diffKey(tab), target);
+    const list = panes(), stored = shared(paneKey(tab));
+    const existing = existingDiffPane(list, tab, stored, f.pane);
+    if (existing) { if (existing !== stored) setShared(paneKey(tab), existing); return; }
     // A split asked for a moment ago may not be in panes() yet: don't make a second one.
     if (this.splitting?.tab === tab && Date.now() - this.splitting.at < SPLIT_WAIT) return;
+    // An explicit pane: an implicit split fails while a layout terminal block is focused.
+    const from = splitFrom(list, tab, f.pane);
+    if (!from) { notify({ title: "Git Graph", body: "No pane in this tab to open the diff beside.", level: "warning" }); return; }
     const before = gitGraphPanes(list, tab), mark = { tab, at: Date.now() };
     this.splitting = mark;
-    run("pane.split", { direction: "right", mod: "git-graph", props: { diff: { tab } } });
+    run("pane.split", { direction: "right", pane: from, mod: "git-graph", props: { diff: { tab } } });
     cx.spawn(async (cx) => {
       const end = Date.now() + SPLIT_WAIT;
       while (Date.now() < end) {

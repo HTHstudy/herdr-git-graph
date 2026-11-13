@@ -4,7 +4,7 @@ import { fixture, git, gitRaw } from "./helpers.mjs";
 import { diffArgs } from "../mods/git-graph/lib/diff.js";
 import {
   sameTarget, targetLabel, absPath, deletesFile, diffOutcome, diffRows, gutterDigits,
-  diffPaneOf, newDiffPane, gitGraphPanes,
+  diffPaneOf, newDiffPane, gitGraphPanes, existingDiffPane, splitFrom,
 } from "../mods/git-graph/lib/diffview.js";
 
 const T = (o) => ({ root: "/r", on: null, commit: null, parent: null, path: "f", from: null, area: null, ...o });
@@ -101,4 +101,41 @@ test("fixture: commit diff of a path not in that commit is gone; rename has no h
   const ren = diffOutcome(t, raw(t));
   assert.equal(ren.state, "ready");
   assert.match(diffRows(ren.diff, "unified", t.from)[0].text, /Renamed from a\.txt/);
+});
+
+test("diffRows split: right gutter shows new numbers for context lines (uneven hunk)", () => {
+  const d = { binary: false, truncated: false, hunks: [{ header: "@@ -10,3 +10,4 @@", lines: [
+    L(" ", 10, 10, "a"), L("+", null, 11, "added"), L(" ", 11, 12, "b"), L("-", 12, null, "gone"), L("+", null, 13, "new"),
+  ] }] };
+  const pairs = diffRows(d, "split").filter((r) => r.type === "pair");
+  assert.deepEqual(pairs.map((r) => [r.leftNo, r.rightNo]), [[10, 10], [null, 11], [11, 12], [12, 13]]);
+});
+
+test("existingDiffPane: stored id, else another git-graph pane of the tab than the focused one", () => {
+  const list = [
+    { pane: "panel", mod: "git-graph", tab: "t1" },
+    { pane: "diff", mod: "git-graph", tab: "t1" },
+    { pane: "sh", mod: undefined, tab: "t1" },
+  ];
+  assert.equal(existingDiffPane(list, "t1", "diff", "panel"), "diff");
+  assert.equal(existingDiffPane(list, "t1", "stale", "panel"), "diff");
+  assert.equal(existingDiffPane(list.slice(0, 1), "t1", null, "panel"), null);
+  assert.equal(existingDiffPane(list.slice(2), "t1", null, "sh"), null);
+});
+
+test("splitFrom picks an explicit pane", () => {
+  const list = [
+    { pane: "gg", mod: "git-graph", tab: "t1", focused: false },
+    { pane: "other-mod", mod: "files", tab: "t1", focused: false },
+    { pane: "sh1", mod: undefined, tab: "t1", focused: false },
+    { pane: "sh2", mod: undefined, tab: "t1", focused: true },
+    { pane: "x", mod: undefined, tab: "t2", focused: false },
+  ];
+  assert.equal(splitFrom(list, "t1", "sh1"), "sh1"); // the focused pane
+  assert.equal(splitFrom(list, "t1", "gg"), "sh2"); // focused is a git-graph pane: the tab's focused one
+  assert.equal(splitFrom(list, "t1", null), "sh2"); // a terminal block focused (pane null)
+  assert.equal(splitFrom(list, "t1", "x"), "sh2"); // another tab's pane
+  const unfocused = list.map((p) => ({ ...p, focused: false }));
+  assert.equal(splitFrom(unfocused, "t1", null), "sh1"); // first non-mod pane
+  assert.equal(splitFrom([list[0]], "t1", "gg"), null);
 });
