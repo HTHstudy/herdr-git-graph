@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -18,6 +18,11 @@ function env() {
 
 export function git(dir, ...args) {
   return execFileSync("git", args, { cwd: dir, env: env(), encoding: "utf8" }).trimEnd();
+}
+
+export function gitRaw(dir, ...args) {
+  const r = spawnSync("git", args, { cwd: dir, env: env(), encoding: "utf8" });
+  return { code: r.status, stdout: r.stdout };
 }
 
 let template;
