@@ -4,6 +4,9 @@
 export const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false"];
 
 /**
+ * `branches`: full ref names (refs/heads/x, refs/remotes/origin/x) to list exactly, or null for
+ * every branch, tag, HEAD and (with `remotes`) remote branch. Missing refs are skipped
+ * (--ignore-missing) and "--" ends the revisions, so a branch named like a file is not a path.
  * @param {{branches: string[]|null, remotes: boolean, count: number}} o
  * @returns {string[]}
  */
@@ -15,7 +18,8 @@ export function logArgs({ branches, remotes, count }) {
     "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e",
     "-n",
     String(count),
-    ...(branches ?? ["--branches", "--tags", ...(remotes ? ["--remotes"] : []), "HEAD"]),
+    ...(branches?.length ? ["--ignore-missing", ...branches] : ["--branches", "--tags", ...(remotes ? ["--remotes"] : []), "HEAD"]),
+    "--",
   ];
 }
 

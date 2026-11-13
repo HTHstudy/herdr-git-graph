@@ -1,14 +1,16 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
-import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
+import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
 import { watchFolder, theme, settings, shared, nextCommand } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
+import { headerElement, fetchAll, busyOf } from "./header.js";
 import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/format.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
+import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
 
 export const ROW_HEIGHT = 26;
 const PAGE = 300;
@@ -29,6 +31,14 @@ export class Panel {
     this.details = new Map();
     this.itemCache = null; this.viewH = 0; this.copied = null;
     this.handle = cx.focus_handle();
+    /** Find: the query (for every repo), the current match's hash, whether the box has the keyboard. */
+    this.query = ""; this.findCur = null; this.finding = false; this.findCache = null;
+    this.branchesOpen = false;
+    this.find = InputState.new({ placeholder: "Find" });
+    this.find.on("change", (_e, cx) => this.setQuery(this.find.value(), cx));
+    this.find.on("submit", (e, cx) => this.stepFind(e?.shift ? -1 : 1, cx));
+    this.find.on("focus", (_e, cx) => { this.finding = true; cx.notify(); });
+    this.find.on("blur", (_e, cx) => { this.finding = false; cx.notify(); });
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
@@ -99,8 +109,11 @@ export class Panel {
         this.repoOf.set(context, repoKey);
         // First visit from this location, but the repo was seen with other options: load again with them.
         if (s.branches !== opts.branches || s.remotes !== opts.remotes || s.count !== opts.count) this.again = true;
-        this.data = { ...data, on, key: repoKey };
-        this.chips = refChips(data.refs, data.head, data.headHash);
+        // A filtered branch that is gone (or a remote one now hidden) drops out; none left → Show All.
+        const pruned = pruneFilter(s.branches, data.refs, s.remotes);
+        if (pruned !== s.branches) { s.branches = pruned; this.again = true; }
+        this.data = { ...data, on, key: repoKey, shownRemotes: opts.remotes };
+        this.chips = this.makeChips();
         this.graphW = graphWidth(data.rows);
         this.status = "ready"; this.error = null; this.pageFailed = false;
         pruneState(s, data.rows); // a vanished row (clean tree, dropped stash) must not re-open later
@@ -214,8 +227,102 @@ export class Panel {
     console.log("git-graph openDiff", JSON.stringify(target));
   }
 
-  /** Task 9 (Find) fills this in. */
-  focusFind() {}
+  /** Ref chips for the loaded data; remote ones only when remote branches are shown. */
+  makeChips() {
+    const d = this.data;
+    const remotes = d.shownRemotes && this.repo(d.key).remotes;
+    return refChips(remotes ? d.refs : d.refs.filter((r) => r.kind !== "remote"), d.head, d.headHash);
+  }
+
+  /** Reload this repo with its (changed) options from the first page. */
+  reloadWith(change, cx) {
+    const d = this.data;
+    if (!d) return;
+    const s = this.repo(d.key);
+    change(s);
+    s.count = PAGE;
+    this.chips = this.makeChips(); this.findCache = null;
+    this.refresh(cx);
+    cx.notify();
+  }
+
+  /** Branches dropdown: the filter, null = Show All. */
+  setBranches(filter, cx) {
+    this.reloadWith((s) => { s.branches = filter; }, cx);
+  }
+
+  toggleBranch(name, cx) {
+    this.reloadWith((s) => { s.branches = toggleBranch(s.branches, name); }, cx);
+  }
+
+  /**
+   * Remove a branch (full ref name or short name) from the current repo's filter; an empty
+   * filter is Show All. For Task 11's "Unselect in Branches Dropdown".
+   */
+  unselectBranch(name, cx) {
+    this.reloadWith((s) => { s.branches = removeBranch(s.branches, name); }, cx);
+  }
+
+  setRemotes(on, cx) {
+    const refs = this.data?.refs ?? [];
+    this.reloadWith((s) => { s.remotes = on; s.branches = pruneFilter(s.branches, refs, on); }, cx);
+  }
+
+  /** Header Fetch: git fetch --all, then every copy refreshes. */
+  fetch(cx) {
+    const d = this.data;
+    if (!d || busyOf(d.root)) return;
+    cx.spawn(async (cx) => { await fetchAll(d.root, d.on); cx.notify(); });
+  }
+
+  /** Header Refresh. */
+  reload(cx) {
+    this.pageFailed = false;
+    this.refresh(cx);
+    cx.notify();
+  }
+
+  /** Hashes of the loaded rows matching the Find query, in row order (cached). */
+  matches() {
+    const d = this.status === "ready" ? this.data : null;
+    if (!d) return [];
+    const c = this.findCache;
+    if (c && c.data === d && c.query === this.query && c.chips === this.chips) return c.list;
+    const list = findMatches(d.rows, this.chips, this.query);
+    this.findCache = { data: d, query: this.query, chips: this.chips, list, set: new Set(list) };
+    return list;
+  }
+
+  /** Typing in Find: jump to the first match. */
+  setQuery(q, cx) {
+    if (q === this.query) return;
+    this.query = q;
+    this.findCur = null;
+    this.stepFind(1, cx);
+  }
+
+  /** ⏎ / ⇧⏎ in Find: the next / previous match, wrapping around. */
+  stepFind(delta, cx) {
+    const m = this.matches();
+    this.findCur = stepMatch(m, this.findCur, delta);
+    const i = this.findCur ? this.indexOf(this.findCur) : -1;
+    if (i >= 0) { this.repo(this.data.key).scroll.scroll_to_item(i, "center"); this.moved(cx); }
+    cx.notify();
+  }
+
+  /** Keys inside the Find box: Esc clears it and gives the keyboard back to the list. */
+  findKey(e, cx) {
+    if (e.keystroke !== "escape") return;
+    this.find.set_value("");
+    this.query = ""; this.findCur = null; this.finding = false;
+    this.handle.focus();
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  focusFind() {
+    this.find.focus();
+  }
 
   /** A click anywhere in the list, by item key. */
   click(key, cx) {
@@ -270,6 +377,7 @@ export class Panel {
 
   /** A keyboard action by name; false when it did nothing (so the key can go on). */
   command(c, cx) {
+    if (c === "find") { this.focusFind(); return true; }
     const d = this.status === "ready" ? this.data : null;
     if (!d) return false;
     const s = this.repo(d.key);
@@ -277,12 +385,13 @@ export class Panel {
     else if (c === "down") this.move(1, cx);
     else if (c === "toggle") { if (!s.selected) return false; this.toggle(s.selected); }
     else if (c === "collapse") { if (!s.expanded) return false; s.expanded = null; }
-    else if (c === "find") this.focusFind();
     else return false;
     return true;
   }
 
   key(e, cx) {
+    if (this.finding) return; // the Find box has the keyboard: its keys are its own
+    if (e.keystroke === "escape" && this.branchesOpen) { this.branchesOpen = false; cx.stop_propagation(); cx.notify(); return; }
     const c = e.keystroke === "up" ? "up" : e.keystroke === "down" ? "down" : e.keystroke === "enter" ? "toggle"
       : e.keystroke === "escape" ? "collapse" : e.key === "/" || e.key_char === "/" ? "find" : null;
     if (!c || !this.command(c, cx)) return;
@@ -341,9 +450,12 @@ export class Panel {
       dim = c.parents.length > 1; chips = this.chips.get(c.hash) ?? [];
     }
     const selected = s.selected === r.hash, open = s.expanded === r.hash;
+    const current = this.findCur === r.hash, match = !current && Boolean(this.findCache?.set.has(r.hash));
+    const bg = selected || current ? t.selected : match ? t.selection : open ? t.surface : null;
     return h_flex().w_full().h(ROW_HEIGHT).flex_none().items_center().pr(10)
-      .when(selected, (e) => e.bg(t.selected)).when(open && !selected, (e) => e.bg(t.surface))
-      .hover((st) => st.bg(selected ? t.selected : t.hover))
+      .when(Boolean(bg), (e) => e.bg(bg))
+      .when(current, (e) => e.border_1().border_color(t.accent))
+      .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
         .children(chips.map((c) => this.chip(c, t)))
@@ -404,14 +516,12 @@ export class Panel {
     this.autoMore(cx);
     this.ensureDetail(cx);
     const t = theme(), d = this.status === "ready" ? this.data : null;
-    const branch = d ? (d.head ?? d.headHash.slice(0, 7)) : "";
+    this.matches(); // keeps the row highlights' match set current
     return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .on_size_change((size, cx) => { if (size.width !== this.width) { this.width = size.width; cx.notify(); } })
-      .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
-        .child(div().font_semibold().child("Graph"))
-        .when(Boolean(branch), (e) => e.child(div().min_w(0).truncate().text_size(12).text_color(t.muted).child(branch))))
+      .child(headerElement(this, t))
       .when(Boolean(d && this.error), (e) => e.child(div().px(12).py(4).text_size(11).text_color(t.ansi1).truncate().child(this.error)))
       .child(d ? this.list(t) : this.message(t));
   }
