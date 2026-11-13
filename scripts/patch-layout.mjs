@@ -34,7 +34,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   let tmp;
   try {
     const raw = fs.readFileSync(file, "utf8");
-    const indent = /^ {4}\S/m.test(raw) ? 4 : 2;
+    const indent = raw.match(/^( +)\S/m)?.[1].length === 4 ? 4 : 2;
     const out = JSON.stringify(patchLayout(JSON.parse(raw)), null, indent) + "\n";
     if (!fs.existsSync(file + ".bak")) fs.writeFileSync(file + ".bak", raw);
     tmp = `${file}.tmp-${process.pid}`;
