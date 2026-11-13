@@ -17,7 +17,7 @@ test("rename commit diff has no hunks", async () => {
 
 test("unstaged README has + line", async () => {
   const root = await fixture();
-  const d = parseDiff(run(root, diffArgs(T({ root, path: "README.md", area: "unstaged" }))));
+  const d = parseDiff(run(root, diffArgs(T({ root, path: "README", area: "unstaged" }))));
   assert.ok(d.hunks[0].lines.some((l) => l.kind === "+"));
 });
 
@@ -37,8 +37,8 @@ test("untracked all +", async () => {
 
 test("binary", async () => {
   const root = await fixture();
-  const c3 = git(root, "rev-parse", "HEAD~1");
-  const t = T({ root, commit: c3, parent: git(root, "rev-parse", "HEAD~2"), path: "bin.dat" });
+  const c3 = git(root, "rev-parse", "HEAD~1^1");
+  const t = T({ root, commit: c3, parent: git(root, "rev-parse", "HEAD~1^1~1"), path: "bin.dat" });
   assert.equal(parseDiff(run(root, diffArgs(t))).binary, true);
 });
 
