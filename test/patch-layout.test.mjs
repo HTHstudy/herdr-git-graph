@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { execFileSync, spawnSync } from "node:child_process";
 import { patchLayout } from "../scripts/patch-layout.mjs";
 
+const SCRIPT = fileURLToPath(new URL("../scripts/patch-layout.mjs", import.meta.url));
 const real = path.join(os.homedir(), ".config/herdr-app/layouts/main-copy.json");
 const sample = {
   type: "row", children: [
@@ -36,11 +38,43 @@ test("CLI writes .bak once and is idempotent", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pl-"));
   const f = path.join(dir, "l.json");
   fs.writeFileSync(f, JSON.stringify(sample));
-  const run = () => execFileSync("node", [path.resolve("scripts/patch-layout.mjs"), f]);
+  const run = () => execFileSync("node", [SCRIPT, f]);
   run();
   const once = fs.readFileSync(f, "utf8");
   assert.deepEqual(JSON.parse(fs.readFileSync(f + ".bak", "utf8")), sample);
   run();
   assert.equal(fs.readFileSync(f, "utf8"), once);
   assert.deepEqual(JSON.parse(fs.readFileSync(f + ".bak", "utf8")), sample);
+});
+
+test("patchLayout throws without tabs block or with bad children", () => {
+  assert.throws(() => patchLayout({ id: "panel-body", type: "stack", children: [] }), /no tabs block/);
+  assert.throws(() => patchLayout({ id: "panel-body", type: "stack", children: {} }), /children/);
+});
+
+test("CLI: bad input exits 1 with one line and writes nothing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pl-"));
+  const bad = path.join(dir, "bad.json"), notabs = path.join(dir, "n.json");
+  fs.writeFileSync(bad, "{nope");
+  fs.writeFileSync(notabs, JSON.stringify({ id: "panel-body", type: "stack", children: [] }));
+  for (const f of [bad, notabs]) {
+    const r = spawnSync("node", [SCRIPT, f], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(r.stderr.trim().split("\n").length, 1);
+    assert.deepEqual(fs.readdirSync(dir).filter(n => n.endsWith(".bak") || n.includes(".tmp")), []);
+  }
+});
+
+test("CLI keeps 4-space indentation; real layout is a no-op", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pl-"));
+  const f = path.join(dir, "l.json");
+  fs.writeFileSync(f, JSON.stringify(sample, null, 4) + "\n");
+  execFileSync("node", [SCRIPT, f]);
+  assert.match(fs.readFileSync(f, "utf8"), /^ {4}"type"/m);
+  if (fs.existsSync(real)) {
+    const raw = fs.readFileSync(real, "utf8"), g = path.join(dir, "real.json");
+    fs.writeFileSync(g, raw);
+    execFileSync("node", [SCRIPT, g]);
+    assert.equal(fs.readFileSync(g, "utf8"), raw);
+  }
 });

@@ -29,6 +29,9 @@ bar for `git-graph-tabs` (a clone of `tabs` with a Graph button after Changes).
 It is idempotent and writes `<layout>.json.bak` once. Switch to the patched
 layout (`layout.switch`) to see Files, Changes and Graph.
 
+The repo's `mods/` folders are the source: edit there and re-run
+`scripts/link.sh`, never the copies in `~/.config/herdr-app/mods`.
+
 ## Undo
 
 Restore `<layout>.json.bak` over the layout, then delete
