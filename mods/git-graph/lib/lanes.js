@@ -55,6 +55,14 @@ export function layoutGraph(commits, stashes, headHash, uncommitted) {
     const lines = [];
     const line = (half, from, to, color) => lines.push({ half, from: cap(from), to: cap(to), color });
 
+    // A stash is a separate line off its base: if no lane expects the base yet, reserve the
+    // base's lane first so the stash never hands its own lane to the base.
+    let reserved = -1;
+    if (node.kind === "stash" && !lanes.some((l) => l && l.hash === node.parents[0])) {
+      reserved = firstFree();
+      lanes[reserved] = { hash: node.parents[0], color: reserved % COLORS };
+    }
+
     let lane = lanes.findIndex((l) => l && l.hash === node.hash);
     const existing = lane !== -1;
     if (!existing) lane = firstFree();
@@ -62,7 +70,7 @@ export function layoutGraph(commits, stashes, headHash, uncommitted) {
 
     // top half: every active lane arrives; lanes holding this hash converge on `lane`
     lanes.forEach((l, i) => {
-      if (!l) return;
+      if (!l || i === reserved) return;
       if (l.hash === node.hash) line("top", i, lane, l.color);
       else line("top", i, i, l.color);
     });
@@ -73,12 +81,12 @@ export function layoutGraph(commits, stashes, headHash, uncommitted) {
 
     // bottom half: pass-through for lanes not involved with this node
     lanes.forEach((l, i) => {
-      if (l) line("bottom", i, i, l.color);
+      if (l && i !== reserved) line("bottom", i, i, l.color);
     });
 
     node.parents.forEach((p, idx) => {
       const other = lanes.findIndex((l, i) => l && l.hash === p && i !== lane);
-      if (other !== -1) {
+      if (other !== -1 && (idx > 0 || other < lane)) {
         line("bottom", lane, other, color); // merges into an existing lane: source color
       } else if (idx === 0) {
         lanes[lane] = { hash: p, color };

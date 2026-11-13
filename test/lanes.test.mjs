@@ -78,5 +78,39 @@ test("fixture: every commit once, lanes within cap", async () => {
   assert.equal(new Set(seen).size, commits.length);
   assert.equal(seen.length, commits.length);
   for (const r of rows) assert.ok(r.lane < MAX_LANES);
-  if (process.env.GG_DUMP) for (const r of rows) console.log(" ".repeat(r.lane * 2) + "o" + " ".repeat((5 - r.lane) * 2) + r.kind[0] + " " + (r.commit?.subject ?? r.stash?.subject ?? "(uncommitted)"));
+  const lane = (subj) => rows.find((r) => r.commit?.subject === subj).lane;
+  for (const subj of ["rename", "Merge feature/x", "main work", "add a", "init"]) assert.equal(lane(subj), 0, subj);
+});
+
+test("first parent keeps its lane when another lane also expects it", () => {
+  const rows = layoutGraph([c("M", "A", "X"), c("T", "A"), c("A"), c("X")], [], null, false);
+  // M@0 -> A(lane0), X(lane1); T opens lane 2? T is new head: first free lane = 2
+  const m = rows.find((r) => r.hash === "M"), a = rows.find((r) => r.hash === "A");
+  assert.equal(m.lane, 0);
+  assert.equal(a.lane, 0);
+  const t = rows.find((r) => r.hash === "T");
+  assert.ok(t.lane > 0);
+});
+
+test("stash on a tip without child lane gets its own lane", () => {
+  const S = { hash: "S", base: "B", selector: "stash@{0}", date: "d", subject: "s" };
+  const rows = layoutGraph([c("B", "R"), c("R")], [S], null, false);
+  assert.equal(rows[0].kind, "stash");
+  assert.equal(rows[1].hash, "B");
+  assert.equal(rows[1].lane, 0);
+  assert.notEqual(rows[0].lane, 0);
+  assert.ok(has(rows[0], "bottom", rows[0].lane, 0));
+  assert.ok(!has(rows[0], "bottom", 0, 0));
+  assert.ok(has(rows[1], "top", 0, 0));
+});
+
+test("stash with uncommitted row on another head keeps base's natural lane", () => {
+  const S = { hash: "S", base: "B", selector: "stash@{0}", date: "d", subject: "s" };
+  const rows = layoutGraph([c("H", "R"), c("B", "R"), c("R")], [S], "H", true);
+  const si = rows.findIndex((r) => r.kind === "stash");
+  const b = rows[si + 1];
+  assert.equal(b.hash, "B");
+  assert.notEqual(rows[si].lane, b.lane);
+  assert.equal(rows.find((r) => r.hash === "H").lane, 0);
+  assert.equal(b.lane, 1);
 });
