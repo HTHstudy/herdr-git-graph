@@ -1,12 +1,15 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
-import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run, notify } from "herdr";
+import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run, notify, openOverlay } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
-import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipAt } from "../lib/format.js";
+import { menuFor } from "../lib/actions.js";
+import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
+import { runPlan } from "./run.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
@@ -31,6 +34,9 @@ export class Panel {
     this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0;
     this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0; this.moreQueued = false; this.pageFailed = false;
     this.seenChanged = shared("git-graph.changed")?.at ?? null;
+    /** This copy's name for menus / dialogs it opens: their work comes back to it (`git-graph.request`). */
+    this.uid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.seenRequest = shared("git-graph.request")?.id ?? null;
     /** repoKey + hash → CommitDetail, oldest first (bounded). */
     this.details = new Map();
     this.itemCache = null; this.viewH = 0; this.copied = null;
@@ -299,6 +305,50 @@ export class Panel {
     this.reloadWith((s) => { s.remotes = on; s.branches = pruneFilter(s.branches, refs, on); }, cx);
   }
 
+  /**
+   * Right-click on a list item: a ref chip names its branch / remote branch / tag, anywhere
+   * else on a row its commit, stash or the uncommitted changes. The Target is captured now
+   * (names and hashes only) and travels in the menu's props.
+   */
+  contextMenu(key, e, cx) {
+    const d = this.status === "ready" ? this.data : null;
+    const item = d ? this.items()[this.indexOf(key)] : null;
+    if (!item || item.part !== "row") return;
+    const r = item.row, s = this.repo(d.key);
+    let target = rowTarget(r);
+    if (r.kind === "commit") {
+      const chip = chipAt(this.chips.get(r.hash) ?? [], e.local_position?.x ?? -1, this.graphW);
+      if (chip?.ref) target = refTarget(chip.ref, d.remotes);
+    }
+    const ctx = menuCtx(d, s.branches), list = menuFor(target, ctx);
+    if (!list.length) return;
+    s.selected = r.hash;
+    openOverlay({
+      mod: "git-graph", kind: "popup", width: 290, height: menuHeight(list),
+      props: { menu: { owner: this.uid, root: d.root, on: d.on, target, ctx } },
+    });
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  /**
+   * Work handed back by a menu or dialog this copy opened (`git-graph.request`):
+   * {id, owner, root, on, run?: {label, plan}, unselect?: name}. Runs here because an
+   * overlay's tasks stop when it closes.
+   */
+  request(cx) {
+    const req = shared("git-graph.request");
+    if (!req || req.owner !== this.uid || req.id === this.seenRequest) return;
+    this.seenRequest = req.id;
+    if (req.run) {
+      cx.spawn(async (cx) => { await runPlan(req.root, req.on, req.run.label, req.run.plan, cx); cx.notify(); });
+    } else if (req.unselect) {
+      const repoKey = JSON.stringify([req.on, req.root]);
+      if (this.data?.key === repoKey) this.unselectBranch(req.unselect, cx);
+      else if (this.repos.has(repoKey)) { const s = this.repo(repoKey); s.branches = removeBranch(s.branches, req.unselect); s.count = PAGE; }
+    }
+  }
+
   /** Header Fetch: git fetch --all, then every copy refreshes. */
   fetch(cx) {
     const d = this.data;
@@ -462,7 +512,7 @@ export class Panel {
 
   chip(c, t) {
     const color = c.kind === "head" ? t.accent : c.kind === "tag" ? t.ansi3 : t.muted;
-    return div().flex_none().max_w(160).h(18).px(5).flex().items_center().rounded(4).border_1().border_color(color)
+    return div().flex_none().w(chipWidth(c.label, c.bold)).h(18).px(5).flex().items_center().rounded(4).border_1().border_color(color)
       .text_size(11).text_color(color).when(c.kind === "head", (e) => e.bg(t.accent + "22")).when(c.bold, (e) => e.font_bold())
       .child(div().truncate().child(c.label));
   }
@@ -530,7 +580,8 @@ export class Panel {
               : detailElement(it, detail));
           }
           return out;
-        }).track_scroll(s.scroll).size_full().on_item_click((key, cx) => this.click(key, cx)))
+        }).track_scroll(s.scroll).size_full().on_item_click((key, cx) => this.click(key, cx))
+        .on_item_secondary_click((key, e, cx) => this.contextMenu(key, e, cx)))
       .child(Scrollbar.vertical(id).viewport_from_layout().absolute().inset_0());
   }
 
@@ -541,6 +592,7 @@ export class Panel {
       this.seenChanged = changed.at;
       if (this.data && changed.root === this.data.root) this.refresh(cx);
     }
+    this.request(cx);
     // The list's own scrolling may swallow the wheel event that reached the end: whenever a
     // render sees the trailing row on screen, check again after this frame.
     this.autoMore(cx);

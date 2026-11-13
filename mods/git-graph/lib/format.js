@@ -80,3 +80,37 @@ export function refChips(refs, head, headHash) {
   for (const { r } of sorted) add(r.hash, { label: r.short, kind: r.kind, bold: Boolean(r.current && head !== null), ref: r });
   return out;
 }
+
+/** Chip geometry: rows draw each chip at exactly this width so a right-click can tell which was hit. */
+export const CHIP_GAP = 4;
+const CHIP_MAX = 160;
+const CHIP_PAD = 12; // 5px padding each side + 1px border each side
+const CHAR_W = 6.4; // a generous 11px UI-font character
+
+/**
+ * Width of a ref chip (an estimate from the label: no text measuring in the runtime).
+ * @param {string} label
+ * @param {boolean} [bold]
+ */
+export function chipWidth(label, bold = false) {
+  const w = CHIP_PAD + Math.ceil(String(label).length * CHAR_W * (bold ? 1.08 : 1));
+  return Math.min(CHIP_MAX, w);
+}
+
+/**
+ * The chip under x (row-local px), or null. Chips start at `start` and sit CHIP_GAP apart.
+ * @template {{label:string, bold?:boolean}} C
+ * @param {C[]} chips
+ * @param {number} x
+ * @param {number} start
+ * @returns {C|null}
+ */
+export function chipAt(chips, x, start) {
+  let left = start;
+  for (const c of chips) {
+    const right = left + chipWidth(c.label, c.bold);
+    if (x >= left && x < right) return c;
+    left = right + CHIP_GAP;
+  }
+  return null;
+}

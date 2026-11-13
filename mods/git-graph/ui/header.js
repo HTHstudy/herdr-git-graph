@@ -2,41 +2,24 @@
 // dropdown (an inline list under the header), Show Remote Branches, and Find.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, Checkbox } from "gpui-base";
-import { shared, setShared, notify } from "herdr";
-import { git } from "./repo.js";
+import { runPlan, busyOf } from "./run.js";
 import { branchEntries, filterLabel, matchCount } from "../lib/filter.js";
 
 const ICONS = "mods/git-graph/icons/";
 const icon = (name, color, size = 14) => svg(ICONS + name + ".svg").size(size).flex_none().text_color(color);
 /** Below this panel width the controls show icons only. */
 export const COMPACT = 360;
-const FETCH_TIMEOUT = 120000;
-
-/** The action label running on a repo (`git-graph.busy.<root>`), or null. */
-export const busyOf = (root) => (root ? shared(`git-graph.busy.${root}`) ?? null : null);
-
-/** Last lines of a git error, for a toast. */
-const tail = (s) => String(s ?? "").trim().split("\n").slice(-4).join("\n");
+/** The action label running on a repo, or null (re-exported from run.js). */
+export { busyOf };
 
 /**
- * Fetch from every remote. Marks the repo busy, toasts a failure, then signals every copy to
- * refresh. Task 11 swaps the body for runPlan({steps: [["fetch", "--all"]]}).
+ * Header Fetch: `git fetch --all` (no prune) through runPlan: busy lock, error toast,
+ * then every copy refreshes.
  * @param {string} root
  * @param {string|null} on
  */
-export async function fetchAll(root, on) {
-  const key = `git-graph.busy.${root}`;
-  if (shared(key)) return;
-  setShared(key, "Fetch");
-  try {
-    const r = await git(root, on, ["fetch", "--all"], { timeout: FETCH_TIMEOUT });
-    if (r.code !== 0) notify({ title: "Fetch failed", body: tail(r.stderr || r.stdout) || `git exited ${r.code}`, level: "error" });
-  } catch (e) {
-    notify({ title: "Fetch failed", body: tail(e?.message ?? e), level: "error" });
-  } finally {
-    setShared(key, null);
-    setShared("git-graph.changed", { root, at: Date.now() });
-  }
+export function fetchAll(root, on) {
+  return runPlan(root, on, "Fetch", { steps: [["fetch", "--all"]] });
 }
 
 function button(id, t, { name, label, compact, disabled, active, onClick }) {
