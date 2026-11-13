@@ -90,7 +90,7 @@
 - 재시작하면 mod 패널은 탭과 함께 복원된다. 복원된 diff 패널은 마지막으로 보던 파일을 다시 보여주고,
   그 커밋/파일이 더 이상 없으면 안내 문구를 띄운다. *(내 판단)*
 - 기본 unified, 헤더 버튼으로 좌우(side-by-side) 전환. 선택은 기억.
-- 문법 강조는 `EditorState`(readonly) + 테마 ansi 색. 추가/삭제 줄 배경색.
+- 추가/삭제 줄 배경색(테마 ansi 색). `EditorState`는 줄 전체 배경을 칠할 수 없어 diff 줄은 직접 그린다 — 토큰 단위 문법 강조는 이번 버전에서 뺀다. *(계획 단계에서 확인)*
 - 헤더: 파일 경로, 커밋 짧은 해시(또는 "Working tree"), 전환 버튼, **"nvim에서 열기"** (herdr-nvim이 있으면 그 탭의 nvim에서 현재 파일을 연다; 없으면 버튼 숨김), 닫기.
 - Esc 또는 닫기로 패널 닫힘.
 - 바이너리/너무 큰 파일은 안내 문구.
@@ -158,7 +158,7 @@
 - Copy Stash Name to Clipboard
 - Copy Stash Hash to Clipboard
 
-복사는 `pbcopy`(macOS) — 다른 OS 대응은 빌더 판단.
+복사는 Herdr의 `cx.write_to_clipboard` (OS 무관).
 
 ### 실행과 결과
 
