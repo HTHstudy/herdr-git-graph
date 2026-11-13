@@ -41,3 +41,12 @@ export function paintRow(row, t, height, width) {
   }
   return div().relative().flex_none().w(width).h(height).children(layers);
 }
+
+/**
+ * A graph cell with only straight vertical lanes over its full height (under an expanded row).
+ * @param {{x:number, color:number}[]} lanes
+ */
+export function paintThrough(lanes, t, height, width) {
+  const layers = lanes.map((l) => layer(segment(laneX(l.x), 0, laneX(l.x), height), laneColor(t, l.color)));
+  return div().relative().flex_none().w(width).h(height).children(layers);
+}

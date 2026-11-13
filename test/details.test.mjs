@@ -5,7 +5,7 @@ import { commitFilesArgs, commitStatusArgs, statusArgs, READ } from "../mods/git
 import { parseNumstat, parseNameStatus, parseStatus } from "../mods/git-graph/lib/parse.js";
 import {
   commitFiles, fileCounts, absoluteDate, bodyLines, commitTarget, uncommittedTarget,
-  uncommittedGroups, detailItems, LINE, TEXT, PAD, MAX_BODY,
+  uncommittedGroups, detailItems, throughLanes, pruneState, LINE, TEXT, PAD, MAX_BODY,
 } from "../mods/git-graph/lib/details.js";
 
 const byMsg = (dir, msg) => git(dir, "log", "--all", "--format=%H", `--grep=^${msg}$`, "-n1");
@@ -106,4 +106,24 @@ test("detailItems", () => {
     [["d:*:staged", LINE], ["d:*:staged:0", LINE], ["d:*:changes", LINE], ["d:*:changes:0", LINE], ["d:*:end", PAD]]);
   assert.equal(u[0].title, "Staged (1)");
   assert.equal(detailItems({ kind: "uncommitted", hash: "*" }, null, [])[0].text, "No changes");
+});
+
+test("throughLanes: bottom lines' end lanes, deduped, on every detail item", () => {
+  const row = { kind: "commit", hash: "h", lines: [
+    { from: 0, to: 0, color: 0, half: "top" }, { from: 0, to: 0, color: 0, half: "bottom" },
+    { from: 0, to: 1, color: 2, half: "bottom" }, { from: 1, to: 1, color: 2, half: "bottom" }, { from: 3, to: 2, color: 4, half: "bottom" },
+  ] };
+  assert.deepEqual(throughLanes(row), [{ x: 0, color: 0 }, { x: 1, color: 2 }, { x: 2, color: 4 }]);
+  assert.deepEqual(throughLanes({ lines: [{ from: 0, to: 0, color: 0, half: "top" }] }), []);
+  for (const it of detailItems(row, null, [])) assert.deepEqual(it.lanes, throughLanes(row));
+});
+
+test("pruneState drops hashes no longer shown", () => {
+  const rows = [{ hash: "a" }, { hash: "b" }];
+  const s = { expanded: "*", selected: "b" };
+  pruneState(s, rows);
+  assert.deepEqual(s, { expanded: null, selected: "b" });
+  const t = { expanded: "a", selected: "gone" };
+  pruneState(t, rows);
+  assert.deepEqual(t, { expanded: "a", selected: null });
 });

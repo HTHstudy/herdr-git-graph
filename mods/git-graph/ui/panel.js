@@ -8,7 +8,7 @@ import { detailElement } from "./details.js";
 import { graphWidth, visibleColumns, relativeDate, refChips } from "../lib/format.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
-import { detailItems, commitFiles, commitTarget, uncommittedTarget } from "../lib/details.js";
+import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
 
 export const ROW_HEIGHT = 26;
 const PAGE = 300;
@@ -103,6 +103,7 @@ export class Panel {
         this.chips = refChips(data.refs, data.head, data.headHash);
         this.graphW = graphWidth(data.rows);
         this.status = "ready"; this.error = null; this.pageFailed = false;
+        pruneState(s, data.rows); // a vanished row (clean tree, dropped stash) must not re-open later
         this.watch(data.root, on, cx);
       } catch (e) {
         failed = true;
@@ -367,7 +368,7 @@ export class Panel {
     const id = "graph-rows";
     const sizes = items.map((it) => it.size);
     if (d.more) sizes.push(ROW_HEIGHT);
-    const detail = { t, mono, indent: this.graphW + 8, rows: this.itemCache.rows, copied: this.copied };
+    const detail = { t, mono, graphW: this.graphW, rows: this.itemCache.rows, copied: this.copied };
     return div().id("graph-list").flex_1().min_h(0).relative()
       .on_size_change((size) => { this.viewH = size.height; })
       .on_scroll_wheel((_e, cx) => this.moved(cx))

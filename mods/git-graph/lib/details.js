@@ -105,6 +105,7 @@ export function uncommittedGroups(entries) {
  */
 export function detailItems(row, detail, status) {
   const k = (part) => `d:${row.hash}:${part}`;
+  /** @type {DetailItem[]} */
   const out = [];
   if (row.kind === "uncommitted") {
     const g = uncommittedGroups(status);
@@ -129,5 +130,35 @@ export function detailItems(row, detail, status) {
     files.forEach((file, i) => out.push({ key: k(`file:${i}`), part: "file", file, size: LINE }));
   }
   out.push({ key: k("end"), part: "end", size: PAD });
+  const lanes = throughLanes(row);
+  for (const it of out) it.lanes = lanes;
   return out;
+}
+
+/**
+ * Lanes that continue below a row (its bottom-half lines' end lanes, one per lane),
+ * drawn straight down through the detail block under it.
+ * @param {{lines?: {to:number, color:number, half:string}[]}} row
+ * @returns {{x:number, color:number}[]}
+ */
+export function throughLanes(row) {
+  const seen = new Set(), out = [];
+  for (const l of row.lines ?? []) {
+    if (l.half !== "bottom" || seen.has(l.to)) continue;
+    seen.add(l.to);
+    out.push({ x: l.to, color: l.color });
+  }
+  return out;
+}
+
+/**
+ * Forget an expanded/selected hash that is no longer among the rows.
+ * @param {{expanded: string|null, selected: string|null}} s mutated
+ * @param {{hash:string}[]} rows
+ */
+export function pruneState(s, rows) {
+  if (s.expanded === null && s.selected === null) return;
+  const have = new Set(rows.map((r) => r.hash));
+  if (s.expanded !== null && !have.has(s.expanded)) s.expanded = null;
+  if (s.selected !== null && !have.has(s.selected)) s.selected = null;
 }

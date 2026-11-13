@@ -3,6 +3,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { fileCounts, absoluteDate, TEXT, PAD } from "../lib/details.js";
+import { paintThrough } from "./graph-cell.js";
 
 const KIND = { A: "ansi2", M: "ansi3", D: "ansi1", R: "ansi4", U: "ansi2" };
 
@@ -11,11 +12,19 @@ const kindColor = (t, status, conflict) => (conflict ? t.blocked : t[KIND[status
 
 /**
  * @param {import("../lib/details.js").DetailItem} item
- * @param {{t: Record<string,string>, mono: string, indent: number, rows: Map<string, any>, copied: string|null}} o
+ * @param {{t: Record<string,string>, mono: string, graphW: number, rows: Map<string, any>, copied: string|null}} o
  */
 export function detailElement(item, o) {
+  // The expanded row's lanes run down through the block; the surface covers only the text.
+  return h_flex().w_full().h(item.size).flex_none()
+    .child(paintThrough(item.lanes ?? [], o.t, item.size, o.graphW))
+    .child(div().w(8).h_full().flex_none())
+    .child(content(item, o));
+}
+
+function content(item, o) {
   const { t, mono } = o;
-  const box = h_flex().w_full().h(item.size).flex_none().items_center().pl(o.indent).pr(12).bg(t.surface).overflow_hidden();
+  const box = h_flex().flex_1().min_w(0).h(item.size).items_center().pl(0).pr(12).bg(t.surface).overflow_hidden();
   const label = (s) => div().w(78).flex_none().text_color(t.dim).text_size(12).child(s);
   const clickable = (e) => e.hover((s) => s.bg(t.hover));
   const path = (f) => (f.from ? `${f.from} → ${f.path}` : f.path);
