@@ -96,6 +96,12 @@ test("chipAt agrees with chipWidth", () => {
   assert.equal(chipAt(chips, start + w0 + CHIP_GAP + w1 + CHIP_GAP, start), chips[2]);
 });
 
+test("textColumns: Hangul jamo vowels / finals add no columns", () => {
+  assert.equal(textColumns("\u1100\u1161\u11A8"), 2, "decomposed 각: one wide syllable");
+  assert.equal(textColumns("\uAC01"), 2, "precomposed 각");
+  assert.equal(textColumns("a\u1160b"), 2);
+});
+
 test("pointerScale: item height over layout height, else zoom, else 1", () => {
   assert.equal(pointerScale({ x: 0, y: 0, width: 300, height: 28.6 }, 26, 1.1), 28.6 / 26);
   assert.equal(pointerScale({ size: { height: 52 } }, 26, 1), 2);

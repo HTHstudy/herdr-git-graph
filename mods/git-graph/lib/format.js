@@ -128,8 +128,11 @@ export const CHIP_COLS = 22;
 
 const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/u;
 
+/** Hangul jamo vowels and final consonants: they join the leading consonant before them. */
+const ZERO = /[\u1160-\u11FF]/u;
+
 /** Monospace columns of one character (a code point). */
-const cols = (ch) => (WIDE.test(ch) ? 2 : 1);
+const cols = (ch) => (ZERO.test(ch) ? 0 : WIDE.test(ch) ? 2 : 1);
 
 /** Monospace columns of a text. */
 export function textColumns(text) {
