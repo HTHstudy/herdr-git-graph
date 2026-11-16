@@ -93,3 +93,24 @@ test("tag details: tagger, date, message of an annotated tag (fixture v1.1)", as
   assert.equal(info.commit, git(d, "rev-parse", "v1.1^{commit}"));
   assert.equal(parseTagDetails(out, "v1"), null);
 });
+
+test("labelAction: double-click on a branch label", async () => {
+  const { labelAction } = await import("../mods/git-graph/lib/targets.js");
+  assert.equal(labelAction({ kind: "head", short: "topic", current: false }, "main"), "checkoutBranch");
+  assert.equal(labelAction({ kind: "head", short: "main", current: true }, "main"), null);
+  assert.equal(labelAction({ kind: "head", short: "main", current: false }, "main"), null, "the current branch by name");
+  assert.equal(labelAction({ kind: "head", short: "main", current: false }, null), "checkoutBranch", "detached: any branch");
+  assert.equal(labelAction({ kind: "remote", short: "origin/x" }, "main"), "checkoutRemote");
+  assert.equal(labelAction({ kind: "tag", short: "v1" }, "main"), null);
+  assert.equal(labelAction(null, "main"), null, "the detached HEAD chip");
+});
+
+test("double-click hit test: a press x scaled by zoom lands on the same part as layout x", async () => {
+  const { refChips, chipPartAt, chipWidth, pointerScale } = await import("../mods/git-graph/lib/format.js");
+  const refs = [{ hash: "a", kind: "head", short: "topic", current: false }, { hash: "a", kind: "remote", short: "origin/topic", current: false }];
+  const chips = refChips(refs, "main", "a", ["origin"]).get("a"), start = 24;
+  const zoom = 1.1, scale = pointerScale(null, 26, zoom);
+  const xRemote = start + chipWidth(chips[0]) - 4; // inside the remote part (layout px)
+  assert.equal(chipPartAt(chips, (xRemote * zoom) / scale, start).part.ref, refs[1]);
+  assert.equal(chipPartAt(chips, xRemote * zoom, start), null, "unscaled it misses (past the chip)");
+});

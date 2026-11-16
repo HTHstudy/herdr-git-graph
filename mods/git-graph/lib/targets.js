@@ -149,3 +149,17 @@ export function parseTagDetails(stdout, name) {
   }
   return null;
 }
+
+/**
+ * What a double-click on a ref label does: a local branch other than the current one →
+ * "checkoutBranch" (runs at once); a remote branch → "checkoutRemote" (its dialog);
+ * the current branch, a tag, a detached HEAD chip (no ref) → null.
+ * @param {{kind:string, short:string, current?:boolean}|null} ref
+ * @param {string|null} head the current branch, null when detached
+ * @returns {"checkoutBranch"|"checkoutRemote"|null}
+ */
+export function labelAction(ref, head) {
+  if (!ref) return null;
+  if (ref.kind === "head") return ref.current || ref.short === head ? null : "checkoutBranch";
+  return ref.kind === "remote" ? "checkoutRemote" : null;
+}

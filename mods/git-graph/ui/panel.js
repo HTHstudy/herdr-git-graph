@@ -7,9 +7,10 @@ import { paintRow, laneColor } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
 import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT, CHIP_ICON, CHIP_ICON_SLOT } from "../lib/format.js";
-import { menuFor, dropChecks } from "../lib/actions.js";
-import { requestState } from "../lib/run.js";
-import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
+import { menuFor, dropChecks, planFor, dialogFor } from "../lib/actions.js";
+import { openDialog } from "./menu.js";
+import { requestState, actionLabel } from "../lib/run.js";
+import { rowTarget, refTarget, menuCtx, menuHeight, labelAction } from "../lib/targets.js";
 import { runPlan, failedGuard } from "./run.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
@@ -473,7 +474,12 @@ export class Panel {
     if (!item || item.part === "meta" || item.part === "body") return;
     const s = this.repo(d.key);
     this.handle.focus();
-    if (item.part === "row") this.toggle(key);
+    if (item.part === "row") {
+      // The second click of a double-click on a branch label checks it out instead.
+      const hit = this.press?.count >= 2 ? this.labelAt(item.row) : null;
+      if (hit) { s.selected = key; this.checkoutLabel(hit.part.ref, cx); }
+      else this.toggle(key);
+    }
     else if (item.part === "hash") {
       cx.write_to_clipboard(item.hash);
       this.copied = key;
@@ -487,6 +493,38 @@ export class Panel {
     } else if (item.part === "ufile") this.openDiff(uncommittedTarget(d.root, d.on, item.file), cx);
     else return;
     cx.notify();
+  }
+
+  /**
+   * The chip part under the last left press on a commit row (recorded by the list's wrapper,
+   * in its own px: the rows start at its left edge), or null.
+   */
+  labelAt(row) {
+    const p = this.press;
+    if (row.kind !== "commit" || !p || p.x == null || Date.now() - p.at > 2000) return null;
+    const x = p.x / (this.scale ?? pointerScale(null, ROW_HEIGHT, settings().zoom));
+    return chipPartAt(this.chips.get(row.hash) ?? [], x, this.graphW);
+  }
+
+  /**
+   * Double-click on a label: a local branch other than the current one is checked out (as the
+   * menu's Checkout Branch: busy lock, guards); a remote branch opens its Checkout dialog;
+   * the current branch, a tag or HEAD do nothing.
+   */
+  checkoutLabel(ref, cx) {
+    const d = this.data;
+    const what = d ? labelAction(ref, d.head) : null;
+    if (!what) return;
+    const ctx = menuCtx(d, this.repo(d.key).branches), target = refTarget(ref, d.remotes);
+    if (what === "checkoutBranch") {
+      const plan = planFor("checkoutBranch", target, {}, ctx), { root, on } = d;
+      cx.spawn(async (cx) => {
+        if (await runPlan(root, on, "Checkout Branch", plan, cx)) notify({ title: `Checked out ${ref.short}`, level: "info", timeout: 2000 });
+        cx.notify();
+      });
+    } else {
+      openDialog({ owner: this.uid, root: d.root, on: d.on, target, ctx }, "checkoutRemote", actionLabel("Checkout Branch…"), dialogFor("checkoutRemote", target, ctx));
+    }
   }
 
   /** ↑/↓: select the previous/next graph row and bring it on screen. */
@@ -650,6 +688,9 @@ export class Panel {
       .on_size_change((size) => { this.viewH = size.height; })
       .on_scroll_wheel((_e, cx) => this.moved(cx))
       .on_mouse_up("left", (_e, cx) => this.moved(cx))
+      // Where a left press landed and its click count: the click handler (key only) reads it
+      // to tell a double-click on a branch label.
+      .on_mouse_down("left", (e) => { this.press = { count: e.click_count, x: e.local_position?.x ?? null, at: Date.now() }; })
       .child(v_virtual_list(id, sizes.length, sizes,
         (i) => items[i]?.key ?? "more",
         (range, cx) => {
