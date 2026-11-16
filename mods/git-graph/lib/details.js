@@ -66,13 +66,22 @@ export function escapeHtml(text) {
 }
 
 /**
+ * One line's spaces for HTML, which collapses runs: leading indentation all &nbsp;; inside the
+ * line a single space stays a plain space (so a copy gets U+0020), and a run of n keeps its
+ * width as one plain space then n-1 &nbsp;. The container is nowrap, so nothing wraps at them.
+ */
+function keepSpaces(html) {
+  return html.replace(/^ +/, (m) => "&nbsp;".repeat(m.length)).replace(/ {2,}/g, (m) => " " + "&nbsp;".repeat(m.length - 1));
+}
+
+/**
  * Display lines as one HTML fragment for a selectable TextView: each line escaped, its spaces
- * kept (&nbsp;, so indentation survives and nothing wraps at a space), lines joined by <br>,
- * an empty line kept as one &nbsp; so it still takes its height.
+ * kept (see keepSpaces), lines joined by <br>, an empty line kept as one &nbsp; so it still
+ * takes its height.
  * @param {string[]} lines
  */
 export function linesHtml(lines) {
-  return `<span>${lines.map((l) => escapeHtml(l).replace(/ /g, "&nbsp;") || "&nbsp;").join("<br>")}</span>`;
+  return `<span>${lines.map((l) => keepSpaces(escapeHtml(l)) || "&nbsp;").join("<br>")}</span>`;
 }
 
 /**

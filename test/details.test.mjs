@@ -132,6 +132,9 @@ test("escapeHtml / linesHtml", () => {
   assert.equal(escapeHtml(`a & <b> "c" 'd'`), "a &amp; &lt;b&gt; &quot;c&quot; 'd'");
   assert.equal(escapeHtml("&amp;"), "&amp;amp;");
   assert.equal(escapeHtml(null), "");
-  assert.equal(linesHtml(["x <y>", "", "  two  spaces"]), "<span>x&nbsp;&lt;y&gt;<br>&nbsp;<br>&nbsp;&nbsp;two&nbsp;&nbsp;spaces</span>");
+  assert.equal(linesHtml(["x <y>", "", "  two  spaces"]), "<span>x &lt;y&gt;<br>&nbsp;<br>&nbsp;&nbsp;two &nbsp;spaces</span>");
+  assert.equal(linesHtml(["a b c"]), "<span>a b c</span>", "single spaces stay plain (copy gives U+0020)");
+  assert.equal(linesHtml(["a    b"]), "<span>a &nbsp;&nbsp;&nbsp;b</span>", "a run keeps its width");
+  assert.equal(linesHtml(["    indented x"]), "<span>&nbsp;&nbsp;&nbsp;&nbsp;indented x</span>");
   assert.equal(linesHtml(["a@b.c"]), "<span>a@b.c</span>");
 });
