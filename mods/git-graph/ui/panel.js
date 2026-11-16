@@ -15,7 +15,7 @@ import { rowTarget, refTarget, menuCtx, menuHeight, labelAction } from "../lib/t
 import { runPlan, failedGuard } from "./run.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
-import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
+import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState, blockRevealIndex } from "../lib/details.js";
 import { existingDiffPane, splitFrom, newDiffPane, gitGraphPanes, diffWhere, spaceKey, findDiffTab, newDiffTab, spaceTabs, sameDiffTab } from "../lib/diffview.js";
 import { paneKey, diffKey, tabKey } from "./diff-pane.js";
 import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
@@ -222,6 +222,7 @@ export class Panel {
       // Stale: another location or repo, or the row was collapsed meanwhile. Drop it.
       if (!this.current(context) || this.data?.key !== repoKey || this.repo(repoKey).expanded !== hash) { this.details.delete(key); return; }
       this.setDetail(key, result);
+      this.revealExpanded();
       cx.notify();
     });
   }
@@ -236,6 +237,29 @@ export class Panel {
     // A failed load is retried when the row is opened again.
     const key = s.expanded && this.detailKey(d.key, s.expanded);
     if (key && this.details.get(key)?.state === "error") this.details.delete(key);
+    this.revealHash = s.expanded;
+    this.revealExpanded();
+  }
+
+  /**
+   * Bring an expanded row and its details on screen (scrolling as little as possible). Runs on
+   * expand and again once the details have loaded, since loading changes the block's height.
+   */
+  revealExpanded() {
+    const d = this.data;
+    if (!d || !this.revealHash) return;
+    const s = this.repo(d.key), hash = s.expanded;
+    if (hash !== this.revealHash) { this.revealHash = null; return; }
+    const items = this.items(), i0 = this.indexOf(hash);
+    if (i0 < 0) return;
+    let i1 = i0;
+    while (i1 + 1 < items.length && items[i1 + 1].key.startsWith(`d:${hash}:`)) i1++;
+    // scroll_to_item moves only as far as needed (nothing when the item is already visible).
+    s.scroll.scroll_to_item(blockRevealIndex(items.map((it) => it.size), i0, i1, this.viewH), "top");
+    // Done unless the details are still loading (their height will change once more).
+    // (Not requested yet counts as loading: render asks for it right after the expand.)
+    const det = hash === "*" ? null : this.details.get(this.detailKey(d.key, hash));
+    if (hash === "*" || (det && det.state !== "loading")) this.revealHash = null;
   }
 
   /** Show a file's diff where `git-graph.diffWhere` says: the space's diff tab (default) or a split. */

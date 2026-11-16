@@ -186,3 +186,20 @@ export function pruneState(s, rows) {
   if (s.expanded !== null && !have.has(s.expanded)) s.expanded = null;
   if (s.selected !== null && !have.has(s.selected)) s.selected = null;
 }
+
+/**
+ * Which item to reveal so an expanded row (`i0`) and its detail items (through `i1`) come on
+ * screen. The list's scroll_to_item only moves as far as needed to show that item (and not at
+ * all when it is already visible), so reveal the last item of the block that still fits in the
+ * view with the row: the whole block when it fits, else as much as fits under the row.
+ * @param {number[]} sizes item heights
+ * @param {number} i0 the row
+ * @param {number} i1 its last detail item
+ * @param {number} viewH the list's height
+ * @returns {number}
+ */
+export function blockRevealIndex(sizes, i0, i1, viewH) {
+  let k = i0, h = sizes[i0];
+  while (k < i1 && h + sizes[k + 1] <= viewH) h += sizes[++k];
+  return k;
+}

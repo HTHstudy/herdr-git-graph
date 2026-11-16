@@ -138,3 +138,18 @@ test("escapeHtml / linesHtml", () => {
   assert.equal(linesHtml(["    indented x"]), "<span>&nbsp;&nbsp;&nbsp;&nbsp;indented x</span>");
   assert.equal(linesHtml(["a@b.c"]), "<span>a@b.c</span>");
 });
+
+import { blockRevealIndex } from "../mods/git-graph/lib/details.js";
+
+test("blockRevealIndex: a block that fits reveals its last item", () => {
+  assert.equal(blockRevealIndex([26, 26, 26, 100, 100], 2, 4, 260), 4);
+});
+
+test("blockRevealIndex: a block taller than the view reveals what fits under the row", () => {
+  // 26 + 100 + 100 = 226 ≤ 260; + 100 = 326 > 260
+  assert.equal(blockRevealIndex([26, 26, 100, 100, 100], 1, 4, 260), 3);
+});
+
+test("blockRevealIndex: a single huge detail item still reveals the row", () => {
+  assert.equal(blockRevealIndex([26, 26, 900], 1, 2, 260), 1);
+});
