@@ -92,7 +92,7 @@ export function filterLabel(filter) {
  * Rows matching a Find query, in row order (loaded rows only). Case-insensitive substring of
  * the subject, author or a ref's short name; a hash matches by prefix.
  * @param {{hash:string, kind:string, commit?:any, stash?:any}[]} rows
- * @param {Map<string, {label:string}[]>} chips ref chips by commit hash
+ * @param {Map<string, {label:string, remotes?:{ref:{short:string}}[]}[]>} chips ref chips by commit hash (paired remotes too)
  * @param {string} query
  * @returns {string[]} matching row hashes
  */
@@ -105,7 +105,7 @@ export function findMatches(rows, chips, query) {
     let hit = false;
     if (r.kind === "commit") {
       const c = r.commit;
-      hit = has(c.subject) || has(c.author) || c.hash.startsWith(q) || (chips.get(c.hash) ?? []).some((x) => has(x.label));
+      hit = has(c.subject) || has(c.author) || c.hash.startsWith(q) || (chips.get(c.hash) ?? []).some((x) => has(x.label) || (x.remotes ?? []).some((p) => has(p.ref?.short)));
     } else if (r.kind === "stash") {
       hit = has(r.stash.subject) || has(r.stash.selector) || r.hash.startsWith(q);
     }

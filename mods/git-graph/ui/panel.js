@@ -307,7 +307,7 @@ export class Panel {
   makeChips() {
     const d = this.data;
     const remotes = d.shownRemotes && this.repo(d.key).remotes;
-    return refChips(remotes ? d.refs : d.refs.filter((r) => r.kind !== "remote"), d.head, d.headHash);
+    return refChips(remotes ? d.refs : d.refs.filter((r) => r.kind !== "remote"), d.head, d.headHash, d.remotes);
   }
 
   /** Reload this repo with its (changed) options from the first page. */

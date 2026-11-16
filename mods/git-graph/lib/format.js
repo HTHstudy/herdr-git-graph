@@ -1,6 +1,7 @@
 // Pure display helpers for the Graph panel. Plain ES module (runs in Herdr and Node).
 
 import { MAX_LANES } from "./lanes.js";
+import { splitRemote } from "./targets.js";
 
 /** Pixels between lane centers, and the graph cell's horizontal padding (both sides together). */
 export const LANE_WIDTH = 14;
@@ -55,7 +56,10 @@ export function relativeDate(unix, now) {
 /**
  * A ref chip. `current`: the checked-out branch (drawn filled with its lane color, "✓" first);
  * `detached`: the "HEAD" chip of a detached HEAD (filled with the accent).
- * @typedef {{label:string, kind:"head"|"remote"|"tag", bold:boolean, ref:object|null, current?:boolean, detached?:boolean}} Chip
+ * `remotes`: same-named remote branches on the same commit, paired into this local chip
+ * (`main | origin`): each draws as a part with just its remote name.
+ * @typedef {{label:string, kind:"head"|"remote"|"tag", bold:boolean, ref:object|null, current?:boolean, detached?:boolean,
+ *   remotes?: {remote:string, ref:object}[]}} Chip
  * One drawn part of a chip: its text and the ref it names (null: detached HEAD).
  * @typedef {{text:string, ref:object|null, kind:string}} ChipPart
  */
@@ -68,9 +72,10 @@ const ORDER = { head: 0, remote: 1, tag: 2 };
  * @param {{hash:string, kind:"head"|"remote"|"tag", short:string, current:boolean}[]} refs
  * @param {string|null} head current branch name, null when detached
  * @param {string|null} headHash
+ * @param {string[]} [remotes] remote names, to split a remote branch into remote and branch
  * @returns {Map<string, Chip[]>}
  */
-export function refChips(refs, head, headHash) {
+export function refChips(refs, head, headHash, remotes = []) {
   /** @type {Map<string, Chip[]>} */
   const out = new Map();
   const add = (hash, chip) => {
@@ -81,9 +86,25 @@ export function refChips(refs, head, headHash) {
   const sorted = refs
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(b.r.current) - Number(a.r.current) || ORDER[a.r.kind] - ORDER[b.r.kind] || a.i - b.i);
+  // A remote branch on the same commit as the same-named local branch joins the local chip.
+  const locals = new Set(refs.filter((r) => r.kind === "head").map((r) => r.hash + "\0" + r.short));
+  const paired = new Map(); // hash \0 local name → [{remote, ref}]
+  for (const r of refs) {
+    if (r.kind !== "remote") continue;
+    const { remote, branch } = splitRemote(r.short, remotes);
+    const k = r.hash + "\0" + branch;
+    if (!remote || !branch || !locals.has(k)) continue;
+    if (!paired.has(k)) paired.set(k, []);
+    paired.get(k).push({ remote, ref: r });
+  }
+  const taken = new Set([...paired.values()].flat().map((p) => p.ref));
   for (const { r } of sorted) {
+    if (taken.has(r)) continue;
     const current = Boolean(r.current && head !== null);
-    add(r.hash, { label: r.short, kind: r.kind, bold: current, ref: r, current, detached: false });
+    const chip = { label: r.short, kind: r.kind, bold: current, ref: r, current, detached: false };
+    const pair = r.kind === "head" ? paired.get(r.hash + "\0" + r.short) : null;
+    if (pair) chip.remotes = pair;
+    add(r.hash, chip);
   }
   return out;
 }
@@ -138,7 +159,10 @@ const CHIP_DIVIDER = 1;
  */
 export function chipParts(c) {
   const chip = typeof c === "string" ? { label: c, kind: "head", ref: null } : c;
-  return [{ text: (chip.current ? CURRENT_MARK : "") + chipText(chip.label), ref: chip.ref ?? null, kind: chip.kind }];
+  return [
+    { text: (chip.current ? CURRENT_MARK : "") + chipText(chip.label), ref: chip.ref ?? null, kind: chip.kind },
+    ...(chip.remotes ?? []).map((p) => ({ text: chipText(p.remote), ref: p.ref, kind: "remote" })),
+  ];
 }
 
 /** Width of one part: its text in monospace columns plus padding on both sides. */

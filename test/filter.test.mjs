@@ -73,11 +73,15 @@ test("findMatches: subject, author, hash prefix, ref names — case-insensitive,
   const refs = parseRefs(git(d, ...refsArgs()));
   const head = git(d, "rev-parse", "HEAD");
   const rows = layoutGraph(commits, stashes, head, true);
-  const chips = refChips(refs, "main", head);
+  const chips = refChips(refs, "main", head, ["origin"]);
   const subj = (hs) => hs.map((h) => rows.find((r) => r.hash === h)).map((r) => r.commit?.subject ?? r.stash.subject);
   assert.deepEqual(subj(findMatches(rows, chips, "FEAT")), ["Merge feature/x", "feat x 2", "feat x 1"]);
   assert.deepEqual(subj(findMatches(rows, chips, "v1.1")), ["Merge feature/x"]); // tag chip
   assert.deepEqual(subj(findMatches(rows, chips, "remote-only")), ["remote only"]); // remote chip
+  // A remote branch paired into its local chip is still found by its full name.
+  const paired = [...chips.values()].flat().find((c) => c.remotes?.length);
+  assert.ok(paired, "the fixture pairs topic and feature/x");
+  assert.ok(findMatches(rows, chips, paired.remotes[0].ref.short).includes(paired.ref.hash));
   assert.deepEqual(subj(findMatches(rows, chips, "wip")), ["On main: wip stash"]);
   const init = commits.find((c) => c.subject === "init").hash;
   assert.deepEqual(findMatches(rows, chips, init.slice(0, 6).toUpperCase()), [init]);

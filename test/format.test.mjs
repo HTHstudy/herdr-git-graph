@@ -47,9 +47,9 @@ test("refChips groups by hash, current branch first and bold", () => {
   assert.deepEqual(m.get("a").map((c) => [c.label, c.kind, c.bold]), [
     ["main", "head", true],
     ["dev", "head", false],
-    ["origin/main", "remote", false],
     ["v2", "tag", false],
   ]);
+  assert.deepEqual(m.get("a")[0].remotes, [{ remote: "origin", ref: refs[1] }], "origin/main pairs into main");
   assert.deepEqual(m.get("b").map((c) => c.label), ["v1.0"]);
   assert.equal(m.get("a")[0].ref, refs[3]);
 });
@@ -131,4 +131,36 @@ test("chipPartAt: one-part chips name their ref", () => {
   assert.equal(hit.chip, chips[1]);
   assert.equal(hit.part.ref, refs[1]);
   assert.equal(chipPartAt(chips, 11, 10).part.ref, refs[0]);
+});
+
+test("refChips pairs same-named remote branches on the same commit only", () => {
+  const refs = [
+    ref("a", "head", "main", true), ref("a", "remote", "origin/main"), ref("a", "remote", "up/stream/main"),
+    ref("b", "remote", "origin/dev"), ref("c", "head", "dev"), // not the same commit: no pair
+    ref("a", "remote", "origin/other"), // no local "other"
+    ref("d", "head", "feat/x"), ref("d", "remote", "origin/feat/x"), // slashes in the branch
+  ];
+  const m = refChips(refs, "main", "a", ["origin", "up/stream"]);
+  assert.deepEqual(m.get("a").map((c) => c.label), ["main", "origin/other"]);
+  assert.deepEqual(m.get("a")[0].remotes.map((p) => p.remote), ["origin", "up/stream"]);
+  assert.deepEqual(m.get("b").map((c) => c.label), ["origin/dev"]);
+  assert.equal(m.get("c")[0].remotes, undefined);
+  assert.deepEqual(m.get("d")[0].remotes.map((p) => p.ref.short), ["origin/feat/x"]);
+  assert.equal(m.get("d").length, 1);
+});
+
+test("paired chip: parts, exact width, part hit-testing", () => {
+  const refs = [ref("a", "head", "main"), ref("a", "remote", "origin/main"), ref("a", "tag", "v1")];
+  const chips = refChips(refs, "dev", "z", ["origin"]).get("a");
+  const [pair, tag] = chips;
+  assert.deepEqual(chipParts(pair).map((p) => [p.text, p.kind, p.ref]), [["main", "head", refs[0]], ["origin", "remote", refs[1]]]);
+  const wl = partWidth("main"), wr = partWidth("origin");
+  assert.equal(chipWidth(pair), 1 + wl + 1 + wr + 1);
+  const start = 30;
+  assert.equal(chipPartAt(chips, start, start).part.ref, refs[0], "left border: local part");
+  assert.equal(chipPartAt(chips, start + 1 + wl - 0.5, start).part.ref, refs[0]);
+  assert.equal(chipPartAt(chips, start + 1 + wl + 1, start).part.ref, refs[1], "past the divider: remote part");
+  assert.equal(chipPartAt(chips, start + chipWidth(pair) - 0.5, start).part.ref, refs[1], "right border: remote part");
+  assert.equal(chipPartAt(chips, start + chipWidth(pair) + 1, start), null, "gap");
+  assert.equal(chipPartAt(chips, start + chipWidth(pair) + CHIP_GAP, start).chip, tag);
 });
