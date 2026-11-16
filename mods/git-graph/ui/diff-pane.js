@@ -7,7 +7,7 @@ import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle } fr
 import { theme, settings, shared, setShared, panes, spaces, focused, run, exec, appHome, readTextFile, notify, nextCommand } from "herdr";
 import { git } from "./repo.js";
 import { diffArgs } from "../lib/diff.js";
-import { sameTarget, targetLabel, absPath, diffOutcome, diffRows, gutterDigits, diffPaneOf, gitGraphPanes, keySpace, findDiffTab, sameDiffTab, diffWhere } from "../lib/diffview.js";
+import { sameTarget, targetLabel, absPath, diffOutcome, diffRows, gutterDigits, diffPaneOf, gitGraphPanes, keySpace, findDiffTab, sameDiffTab, diffWhere, diffCloseCommand } from "../lib/diffview.js";
 
 const LINE = 20;
 export const diffKey = (tab) => "git-graph.diff." + tab;
@@ -80,11 +80,14 @@ export class DiffPane {
     cx.spawn(async () => { this.handle.focus(); });
   }
 
-  /** Esc / ✕: a split pane closes; in tab mode the diff tab closes. */
+  /**
+   * Esc / ✕: a split pane closes; in tab mode the diff tab closes when this pane is all it holds,
+   * else only this pane (a shell split in beside it lives on).
+   */
   close() {
     if (this.space) {
-      const tab = this.diffTab()?.tab;
-      if (tab) { run("tab.close", { id: tab }); return; }
+      const cmd = diffCloseCommand(panes(), this.diffTab());
+      if (cmd) { run(cmd.name, cmd.args); return; }
       // Not recorded (or ambiguous): the focused pane when it is a git-graph one (this pane, here).
       const f = focused()?.pane;
       if (f && panes().some((p) => p.pane === f && p.mod === "git-graph")) run("pane.close", { pane: f });

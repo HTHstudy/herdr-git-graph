@@ -159,14 +159,18 @@ function soleGitGraphPane(list, tab) {
   return ps.length === 1 && ps[0].mod === "git-graph" ? ps[0].pane : null;
 }
 
+/** The name tab.new gives a diff tab; the fallback only adopts a tab with this name. */
+export const DIFF_TAB_NAME = "Diff";
+
 /**
  * The space's diff tab: the record while its tab is still in the space and its pane still a
- * git-graph pane of that tab (a shell split in beside it is fine); else, when the space has
- * exactly one tab whose only pane is a git-graph pane other than `exclude` (the focused pane,
- * which may be the Graph itself), that one (after a restart ids can change). Null: open one.
+ * git-graph pane of that tab (a shell split in beside it is fine: it is still the diff tab to
+ * select or fill). Else, when the space has exactly one tab named "Diff" whose only pane is a
+ * git-graph pane, that one (after a restart ids can change). A git-graph pane alone in another
+ * tab (an orphaned split pane, or the Graph itself as a pane) is not a diff tab. Null: open one.
  * @returns {{tab: string, pane: string}|null}
  */
-export function findDiffTab(spaceList, list, spaceId, stored, exclude = null) {
+export function findDiffTab(spaceList, list, spaceId, stored) {
   const tabs = tabsOf(spaceList, spaceId);
   if (stored?.tab && stored?.pane && tabs.some((t) => t.id === stored.tab)
     && list.some((p) => p.pane === stored.pane && p.tab === stored.tab && p.mod === "git-graph")) {
@@ -174,10 +178,26 @@ export function findDiffTab(spaceList, list, spaceId, stored, exclude = null) {
   }
   const found = [];
   for (const t of tabs) {
+    if (t.name !== DIFF_TAB_NAME) continue;
     const pane = soleGitGraphPane(list, t.id);
-    if (pane && pane !== exclude) found.push({ tab: t.id, pane });
+    if (pane) found.push({ tab: t.id, pane });
   }
   return found.length === 1 ? found[0] : null;
+}
+
+/**
+ * What Esc / ✕ in the diff tab runs: tab.close only when the tab's only pane is the diff pane
+ * (tab.close asks nobody unless it is the space's last tab, so a shell split in beside it would
+ * die silently); else pane.close for the diff pane alone. Null without a record.
+ * @param {{pane:string, tab:string, mod?:string}[]} list panes()
+ * @param {{tab:string, pane:string}|null} rec findDiffTab's result
+ * @returns {{name:"tab.close", args:{id:string}}|{name:"pane.close", args:{pane:string}}|null}
+ */
+export function diffCloseCommand(list, rec) {
+  if (!rec?.tab || !rec?.pane) return null;
+  return soleGitGraphPane(list, rec.tab) === rec.pane
+    ? { name: "tab.close", args: { id: rec.tab } }
+    : { name: "pane.close", args: { pane: rec.pane } };
 }
 
 /** After tab.new: the space's tab that wasn't there before, once its only pane (git-graph) shows. */

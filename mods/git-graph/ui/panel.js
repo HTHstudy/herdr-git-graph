@@ -253,7 +253,7 @@ export class Panel {
     if (!space) return;
     setShared(diffKey(spaceKey(space)), target);
     const sp = spaces(), list = panes(), stored = shared(tabKey(space));
-    const existing = findDiffTab(sp, list, space, stored, f.pane);
+    const existing = findDiffTab(sp, list, space, stored);
     if (existing) {
       if (!sameDiffTab(existing, stored)) setShared(tabKey(space), existing);
       run("tab.select", { id: existing.tab });
@@ -266,11 +266,13 @@ export class Panel {
     run("tab.new", { space, name: "Diff", mod: "git-graph", props: { diff: { tab: spaceKey(space) } } });
     cx.spawn(async (cx) => {
       const end = Date.now() + SPLIT_WAIT;
+      let shown = false;
       while (Date.now() < end) {
         const found = newDiffTab(spaces(), panes(), space, before);
-        if (found) { setShared(tabKey(space), found); break; }
+        if (found) { setShared(tabKey(space), found); shown = true; break; }
         await cx.sleep(20);
       }
+      if (!shown) notify({ title: "Git Graph", body: "The diff tab has not appeared yet.", level: "warning" });
       if (this.opening === mark) this.opening = null;
     });
   }
