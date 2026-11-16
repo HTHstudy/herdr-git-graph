@@ -6,7 +6,7 @@ import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
-import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipAt } from "../lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipAt, chipText, pointerScale, CHIP_FONT } from "../lib/format.js";
 import { menuFor, dropChecks } from "../lib/actions.js";
 import { requestState } from "../lib/run.js";
 import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
@@ -356,7 +356,10 @@ export class Panel {
     const r = item.row, s = this.repo(d.key);
     let target = rowTarget(r);
     if (r.kind === "commit") {
-      const chip = chipAt(this.chips.get(r.hash) ?? [], e.local_position?.x ?? -1, this.graphW);
+      // local_position is in zoomed px: back to layout px (the chips' widths) first.
+      const scale = pointerScale(e.bounds, ROW_HEIGHT, settings().zoom);
+      const x = e.local_position ? e.local_position.x / scale : -1;
+      const chip = chipAt(this.chips.get(r.hash) ?? [], x, this.graphW);
       if (chip?.ref) target = refTarget(chip.ref, d.remotes);
     }
     const ctx = menuCtx(d, s.branches);
@@ -565,11 +568,12 @@ export class Panel {
     cx.timer.after(120, (cx) => this.checkMore(cx));
   }
 
-  chip(c, t) {
+  chip(c, t, mono) {
     const color = c.kind === "head" ? t.accent : c.kind === "tag" ? t.ansi3 : t.muted;
+    // Monospace at CHIP_FONT: chipWidth is exact for it (and the right-click hit test uses it).
     return div().flex_none().w(chipWidth(c.label, c.bold)).h(18).px(5).flex().items_center().rounded(4).border_1().border_color(color)
-      .text_size(11).text_color(color).when(c.kind === "head", (e) => e.bg(t.accent + "22")).when(c.bold, (e) => e.font_bold())
-      .child(div().truncate().child(c.label));
+      .font_family(mono).text_size(CHIP_FONT).text_color(color).when(c.kind === "head", (e) => e.bg(t.accent + "22")).when(c.bold, (e) => e.font_bold())
+      .child(div().whitespace_nowrap().overflow_hidden().child(chipText(c.label)));
   }
 
   row(r, t, cols, now, mono, s) {
@@ -593,7 +597,7 @@ export class Panel {
       .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
-        .children(chips.map((c) => this.chip(c, t)))
+        .children(chips.map((c) => this.chip(c, t, mono)))
         .child(div().flex_1().min_w(0).truncate().text_color(current ? t.accent : dim ? t.dim : t.foreground).child(subject || " ")))
       .when(cols.author, (e) => e.child(div().w(110).flex_none().pl(10).truncate().text_color(t.muted).child(author)))
       .when(cols.date, (e) => e.child(div().w(76).flex_none().pl(10).truncate().text_color(t.muted).child(date ? relativeDate(date, now) : "")))

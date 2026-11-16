@@ -79,7 +79,7 @@ test("chipAt: hit-tests chips laid out at chipWidth, CHIP_GAP apart", () => {
   assert.equal(chipAt(chips, start + wa + CHIP_GAP, start), b);
   assert.equal(chipAt(chips, start + wa + CHIP_GAP + wb + CHIP_GAP + 2, start), c);
   assert.equal(chipAt(chips, 5000, start), null);
-  assert.equal(chipWidth("x".repeat(100)), 160);
+  assert.equal(chipWidth("x".repeat(100)), Math.ceil(10 + 22 * 6.6) + 2, "long names are cut to 22 columns");
 });
 
 test("tag details: tagger, date, message of an annotated tag (fixture v1.1)", async () => {

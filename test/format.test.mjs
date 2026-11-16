@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { graphWidth, visibleColumns, relativeDate, refChips, laneX } from "../mods/git-graph/lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, laneX, chipWidth, chipAt, chipText, textColumns, pointerScale, CHIP_GAP, CHIP_COLS } from "../mods/git-graph/lib/format.js";
 
 test("graphWidth counts lanes from rows and lines, capped at 12", () => {
   assert.equal(graphWidth([]), 24);
@@ -58,4 +58,49 @@ test("refChips adds a bold HEAD chip when detached", () => {
   const m = refChips([ref("x", "head", "main")], null, "y");
   assert.deepEqual(m.get("y"), [{ label: "HEAD", kind: "head", bold: true, ref: null }]);
   assert.equal(m.get("x")[0].bold, false);
+});
+
+test("chipWidth: monospace columns × 6.6 + padding + border, exact", () => {
+  assert.equal(chipWidth("main"), Math.ceil(10 + 4 * 6.6) + 2); // 39
+  assert.equal(chipWidth("main", true), chipWidth("main"), "bold keeps the advance");
+  const narrow = "feat/copy-and-diff-tab"; // 22 columns: shown whole
+  assert.equal(chipText(narrow), narrow);
+  assert.equal(chipWidth(narrow), Math.ceil(10 + 22 * 6.6) + 2);
+  assert.ok(chipWidth(narrow) < 12 + Math.ceil(22 * 6.4) + 12, "no wider than the old estimate plus slack");
+});
+
+test("chipText cuts long names to CHIP_COLS columns with …", () => {
+  const long = "feature/a-really-long-branch-name-here";
+  const cut = chipText(long);
+  assert.equal(textColumns(cut), CHIP_COLS);
+  assert.ok(cut.endsWith("…") && long.startsWith(cut.slice(0, -1)));
+  assert.equal(chipWidth(long), chipWidth(cut));
+});
+
+test("CJK counts two columns", () => {
+  assert.equal(textColumns("기능"), 4);
+  assert.equal(textColumns("a日b"), 4);
+  assert.ok(chipWidth("기능") > chipWidth("ab"));
+  const cut = chipText("가".repeat(20));
+  assert.ok(textColumns(cut) <= CHIP_COLS && cut.endsWith("…"));
+});
+
+test("chipAt agrees with chipWidth", () => {
+  const chips = [{ label: "main", bold: true }, { label: "origin/feat/copy-and-diff-tab" }, { label: "v1" }];
+  const start = 40, w0 = chipWidth("main"), w1 = chipWidth(chips[1].label);
+  assert.equal(chipAt(chips, start - 1, start), null);
+  assert.equal(chipAt(chips, start, start), chips[0]);
+  assert.equal(chipAt(chips, start + w0 - 0.5, start), chips[0]);
+  assert.equal(chipAt(chips, start + w0 + 1, start), null, "in the gap");
+  assert.equal(chipAt(chips, start + w0 + CHIP_GAP, start), chips[1]);
+  assert.equal(chipAt(chips, start + w0 + CHIP_GAP + w1 + CHIP_GAP, start), chips[2]);
+});
+
+test("pointerScale: item height over layout height, else zoom, else 1", () => {
+  assert.equal(pointerScale({ x: 0, y: 0, width: 300, height: 28.6 }, 26, 1.1), 28.6 / 26);
+  assert.equal(pointerScale({ size: { height: 52 } }, 26, 1), 2);
+  assert.equal(pointerScale(undefined, 26, 1.1), 1.1);
+  assert.equal(pointerScale({ height: 0 }, 26, 1.25), 1.25);
+  assert.equal(pointerScale({ height: 9999 }, 26, undefined), 1, "implausible height ignored");
+  assert.equal(pointerScale(null, 26, "x"), 1);
 });

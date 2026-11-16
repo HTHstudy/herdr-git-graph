@@ -81,20 +81,68 @@ export function refChips(refs, head, headHash) {
   return out;
 }
 
-/** Chip geometry: rows draw each chip at exactly this width so a right-click can tell which was hit. */
+/**
+ * Chip geometry: rows draw each chip at exactly this width so a right-click can tell which was
+ * hit. Labels are drawn in the monospace font at 11px, where every glyph advances 0.6em (6.6px;
+ * bold the same), so the width is exact rather than estimated. A wide (CJK, emoji) character
+ * takes two columns.
+ */
 export const CHIP_GAP = 4;
-const CHIP_MAX = 160;
-const CHIP_PAD = 12; // 5px padding each side + 1px border each side
-const CHAR_W = 6.4; // a generous 11px UI-font character
+export const CHIP_FONT = 11;
+const CHIP_CHAR = 6.6; // 0.6em at 11px
+const CHIP_PAD = 5; // each side
+const CHIP_BORDER = 1; // each side
+/** Longer labels are cut to this many columns, the last one "…". */
+export const CHIP_COLS = 22;
+
+const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/u;
+
+/** Monospace columns of one character (a code point). */
+const cols = (ch) => (WIDE.test(ch) ? 2 : 1);
+
+/** Monospace columns of a text. */
+export function textColumns(text) {
+  let n = 0;
+  for (const ch of String(text)) n += cols(ch);
+  return n;
+}
+
+/** The text a chip shows: the label, or its first columns and "…" when wider than CHIP_COLS. */
+export function chipText(label) {
+  const s = String(label);
+  if (textColumns(s) <= CHIP_COLS) return s;
+  let out = "", n = 0;
+  for (const ch of s) {
+    if (n + cols(ch) > CHIP_COLS - 1) break;
+    out += ch; n += cols(ch);
+  }
+  return out + "…";
+}
 
 /**
- * Width of a ref chip (an estimate from the label: no text measuring in the runtime).
+ * Width of a ref chip (border box) for its shown text. Bold has the same advance in a
+ * monospace font, so it doesn't change the width.
  * @param {string} label
- * @param {boolean} [bold]
+ * @param {boolean} [_bold]
  */
-export function chipWidth(label, bold = false) {
-  const w = CHIP_PAD + Math.ceil(String(label).length * CHAR_W * (bold ? 1.08 : 1));
-  return Math.min(CHIP_MAX, w);
+export function chipWidth(label, _bold = false) {
+  return Math.ceil(CHIP_PAD * 2 + textColumns(chipText(label)) * CHIP_CHAR) + CHIP_BORDER * 2;
+}
+
+/**
+ * How many logical px the pointer's local positions use per layout px (Herdr's zoom).
+ * From the pressed item's reported height over its layout height when known, else `zoom`.
+ * @param {{height?: number, size?: {height?: number}}|null|undefined} bounds
+ * @param {number} layoutHeight
+ * @param {unknown} zoom settings().zoom
+ */
+export function pointerScale(bounds, layoutHeight, zoom) {
+  const h = bounds?.size?.height ?? bounds?.height;
+  if (Number.isFinite(h) && h > 0 && layoutHeight > 0) {
+    const s = h / layoutHeight;
+    if (s >= 0.25 && s <= 4) return s;
+  }
+  return typeof zoom === "number" && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
 }
 
 /**
