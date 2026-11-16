@@ -103,6 +103,10 @@ test("pointerScale: item height over layout height, else zoom, else 1", () => {
   assert.equal(pointerScale({ height: 0 }, 26, 1.25), 1.25);
   assert.equal(pointerScale({ height: 9999 }, 26, undefined), 1, "implausible height ignored");
   assert.equal(pointerScale(null, 26, "x"), 1);
+  assert.equal(pointerScale({ height: 660 }, 600, 1.1), 1.1, "a whole list box: its own layout height");
+  assert.equal(pointerScale({ height: 660 }, 0, 1.25), 1.25, "layout height not measured yet: zoom");
+  assert.equal(pointerScale({ height: 660 }, undefined, undefined), 1, "nothing known: 1");
+  assert.equal(pointerScale({ size: {} }, 26, 2), 2, "bounds without a height: zoom");
 });
 
 test("chip icons: check for the checked-out branch, branch, cloud, tag, commit; icon slot counted", () => {

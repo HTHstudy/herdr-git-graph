@@ -366,9 +366,9 @@ export class Panel {
     const r = item.row, s = this.repo(d.key);
     let target = rowTarget(r);
     if (r.kind === "commit") {
-      // local_position is in zoomed px: back to layout px (the chips' widths) first.
+      // local_position is in zoomed px: back to layout px (the chips' widths) first. The scale
+      // is this event's own: the row's painted height over its layout height.
       const scale = pointerScale(e.bounds, ROW_HEIGHT, settings().zoom);
-      if (e.bounds) this.scale = scale; // for left presses, which only see the list's box
       const x = e.local_position ? e.local_position.x / scale : -1;
       const hit = chipPartAt(this.chips.get(r.hash) ?? [], x, this.graphW);
       if (hit?.part.ref) target = refTarget(hit.part.ref, d.remotes);
@@ -504,13 +504,13 @@ export class Panel {
   }
 
   /**
-   * The chip part under the last left press on a commit row (recorded by the list's wrapper,
-   * in its own px: the rows start at its left edge), or null.
+   * The chip part under the last left press on a commit row (recorded by the list's wrapper in
+   * layout px: the rows start at its left edge), or null.
    */
   labelAt(row) {
     const p = this.press;
     if (row.kind !== "commit" || !p || p.x == null || Date.now() - p.at > 2000) return null;
-    const x = p.x / (this.scale ?? pointerScale(null, ROW_HEIGHT, settings().zoom));
+    const x = p.x;
     return chipPartAt(this.chips.get(row.hash) ?? [], x, this.graphW);
   }
 
@@ -696,9 +696,14 @@ export class Panel {
       .on_size_change((size) => { this.viewH = size.height; })
       .on_scroll_wheel((_e, cx) => this.moved(cx))
       .on_mouse_up("left", (_e, cx) => this.moved(cx))
-      // Where a left press landed and its click count: the click handler (key only) reads it
-      // to tell a double-click on a branch label.
-      .on_mouse_down("left", (e) => { this.press = { count: e.click_count, x: e.local_position?.x ?? null, at: Date.now() }; })
+      // Where a left press landed (layout px) and its click count: the click handler (key only)
+      // reads it to tell a double-click on a branch label. local_position is in zoomed px; the
+      // scale is this event's own: the wrapper's painted height over its layout height (viewH,
+      // from this same element's on_size_change).
+      .on_mouse_down("left", (e) => {
+        const scale = pointerScale(e.bounds, this.viewH, settings().zoom);
+        this.press = { count: e.click_count, x: e.local_position ? e.local_position.x / scale : null, at: Date.now() };
+      })
       .child(v_virtual_list(id, sizes.length, sizes,
         (i) => items[i]?.key ?? "more",
         (range, cx) => {
