@@ -14,6 +14,15 @@ A Herdr mod that recreates the VS Code Git Graph view.
   toggle switches to the old behavior, a diff pane split in beside the work; the choice is
   shared (`git-graph.diffWhere` = `tab` | `split`). Esc or ✕ closes the diff tab (or pane).
   While a diff tab or pane has the focus, the Graph keeps showing its repository.
+- **Ref chips**: drawn in the monospace font so their widths are exact (names over 22
+  columns end in "…"), each with an icon (branch; check for the checked-out branch; cloud
+  for a remote branch; tag; commit for a detached HEAD). A local branch and its same-named
+  remote branch on the same commit share one chip (`main | origin`); right-click or
+  double-click acts on the part under the pointer. The checked-out branch's chip is filled
+  with its lane color and comes first; HEAD's row has a faint tint of that color.
+- **Double-click a branch label** to check it out (a remote branch opens the Checkout dialog).
+- **Lane colors**: 12 colors from the theme's ansi palette, starting with blue.
+- **Branches dropdown** floats over the graph instead of pushing it down.
 
 ## Install (development)
 
@@ -63,7 +72,7 @@ first-run state) or delete the clone. Then delete
 
 ## Status
 
-- ✅ verified: `npm test` (143+ passing), including the layout patch on a copy of a real layout and real-git guard tests (stash index shift, moved branch tip, tag named like a branch).
+- ✅ verified: `npm test` (155 passing), including the layout patch on a copy of a real layout and real-git guard tests (stash index shift, moved branch tip, tag named like a branch).
 - ✅ verified: `herdr-app check` passes for `git-graph` and `git-graph-tabs`.
 - ✅ verified: patched `main-copy.json` (a clone) loads with no `*.error` files and empty `errors` in `herdr-app status`.
 - ⏳ needs a manual check: switch to the patched clone and confirm the Files, Changes and Graph buttons (the welcome's `workspace.panels` lists only files and changes; the bar adds Graph when the layout has a `graph` block).
