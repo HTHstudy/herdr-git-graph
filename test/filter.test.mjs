@@ -8,7 +8,7 @@ import { parseLog, parseRefs, parseStashes } from "../mods/git-graph/lib/parse.j
 import { layoutGraph } from "../mods/git-graph/lib/lanes.js";
 import { refChips } from "../mods/git-graph/lib/format.js";
 import {
-  toggleBranch, removeBranch, showUncommitted, pruneFilter, shortRef, branchEntries, filterLabel, findMatches, stepMatch, matchCount,
+  toggleBranch, removeBranch, showUncommitted, pruneFilter, shortRef, branchEntries, filterLabel, findMatches, stepMatch, matchCount, dropMaxHeight,
 } from "../mods/git-graph/lib/filter.js";
 
 const subjects = (out) => parseLog(out).map((c) => c.subject);
@@ -124,4 +124,12 @@ test("a branch filter without HEAD drops the Uncommitted row and its false lane"
   assert.equal(showUncommitted(true, ["refs/heads/main"], withMain, head), true);
   assert.equal(showUncommitted(true, null, [], head), true);
   assert.equal(showUncommitted(false, null, withMain, head), false);
+});
+
+test("dropMaxHeight: at most 320, ends 16px above the panel's bottom, unmeasured → 320", () => {
+  assert.equal(dropMaxHeight(0, 71), 320);
+  assert.equal(dropMaxHeight(undefined, 71), 320);
+  assert.equal(dropMaxHeight(1000, 71), 320);
+  assert.equal(dropMaxHeight(300, 71), 300 - 71 - 16);
+  assert.equal(dropMaxHeight(100, 71), 60, "never below the floor");
 });

@@ -133,3 +133,12 @@ export function stepMatch(matches, current, delta) {
 export function matchCount(matches, current) {
   return `${current ? matches.indexOf(current) + 1 : 0}/${matches.length}`;
 }
+
+/**
+ * The Branches dropdown's max height: at most `cap`, and short enough to end `margin` above the
+ * panel's bottom edge (it hangs at `top`). Unmeasured panel (0): `cap`. Never below `floor`.
+ */
+export function dropMaxHeight(panelH, top, cap = 320, margin = 16, floor = 60) {
+  if (!(panelH > 0)) return cap;
+  return Math.max(floor, Math.min(cap, panelH - top - margin));
+}

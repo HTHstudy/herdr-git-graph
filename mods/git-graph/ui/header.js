@@ -3,12 +3,15 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, Checkbox } from "gpui-base";
 import { runPlan, busyOf } from "./run.js";
-import { branchEntries, filterLabel, matchCount } from "../lib/filter.js";
+import { branchEntries, filterLabel, matchCount, dropMaxHeight } from "../lib/filter.js";
 
 const ICONS = "mods/git-graph/icons/";
 const icon = (name, color, size = 14) => svg(ICONS + name + ".svg").size(size).flex_none().text_color(color);
 /** Below this panel width the controls show icons only. */
 export const COMPACT = 360;
+/** The header's rows; with its bottom border, HEADER_H is where the dropdown hangs. */
+const TITLE_H = 36, CONTROLS_H = 34;
+export const HEADER_H = TITLE_H + CONTROLS_H + 1;
 /** The action label running on a repo, or null (re-exported from run.js). */
 export { busyOf };
 
@@ -54,7 +57,7 @@ export function headerElement(p, t) {
   const busy = busyOf(d?.root);
   const s = d ? p.repo(d.key) : null;
 
-  const title = h_flex().h(36).flex_none().px(12).gap(8).items_center()
+  const title = h_flex().h(TITLE_H).flex_none().px(12).gap(8).items_center()
     .child(div().flex_none().font_semibold().child("Graph"))
     .when(Boolean(branch), (e) => e.child(div().min_w(0).flex_shrink(1).truncate().text_size(12).text_color(t.muted).child(branch)))
     .when(Boolean(busy), (e) => e.child(h_flex().flex_none().gap(4).items_center()
@@ -68,7 +71,7 @@ export function headerElement(p, t) {
 
   const filter = s.branches;
   const matches = p.matches(), count = p.query.trim() ? matchCount(matches, p.findCur) : "";
-  const controls = h_flex().h(34).flex_none().px(12).gap(6).items_center()
+  const controls = h_flex().h(CONTROLS_H).flex_none().px(12).gap(6).items_center()
     .child(button("gg-branches", t, {
       name: "branch", compact: false, active: p.branchesOpen || Boolean(filter),
       label: (compact ? "" : "Branches: ") + filterLabel(filter) + " ▾",
@@ -94,9 +97,7 @@ export function headerElement(p, t) {
   return v_flex().flex_none().border_b(1).border_color(t.border).child(title).child(controls);
 }
 
-/** Header height with its controls row and bottom border: where the dropdown hangs. */
-export const HEADER_H = 36 + 34 + 1;
-const DROP_W = 260, DROP_MAX_H = 320, DROP_LEFT = 12;
+const DROP_W = 260, DROP_MAX_H = 320, DROP_LEFT = 12, DROP_MARGIN = 16;
 /** How long after an outside press closed the dropdown the Branches button won't reopen it. */
 const CLOSE_GRACE = 300;
 
@@ -116,7 +117,10 @@ export function branchesDropdown(p, t) {
   const stop = (_e, cx) => cx.stop_propagation();
   // The positioned box and the scrolling box are separate: a scrollbar area doesn't keep
   // absolute positioning (the dropdown fell into the flow under the list).
-  const list = v_flex().id("gg-branch-scroll").w_full().max_h(DROP_MAX_H).overflow_y_scrollbar().py(4)
+  const list = v_flex().id("gg-branch-scroll").w_full()
+    // The panel's measured height (less its 1px top and bottom borders) caps it: a short panel
+    // never clips the list's bottom.
+    .max_h(dropMaxHeight(p.height > 0 ? p.height - 2 : 0, HEADER_H, DROP_MAX_H, DROP_MARGIN)).overflow_y_scrollbar().py(4)
     .child(checkRow("gg-br-all", t, !filter, "Show All", (_v, cx) => { p.setBranchesOpen(false); p.setBranches(null, cx); }))
     .children(entries.map((en) => checkRow("gg-br-" + en.name, t, en.checked,
       en.kind === "remote" ? div().text_color(t.muted).child(en.label) : en.label,

@@ -35,7 +35,7 @@ export class Panel {
     /** Location key → repo key of the last load there, so a revisit loads with that repo's options. */
     this.repoOf = new Map();
     this.context = null; this.data = null; this.status = "loading"; this.error = null;
-    this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0;
+    this.chips = new Map(); this.graphW = graphWidth([]); this.width = 0; this.height = 0;
     this.range = { start: 0, end: 0 }; this.watched = null; this.watchGen = 0; this.moreQueued = false; this.pageFailed = false;
     this.seenChanged = shared("git-graph.changed")?.at ?? null;
     /** This copy's name for menus / dialogs it opens: their work comes back to it (`git-graph.request`). */
@@ -744,7 +744,10 @@ export class Panel {
     return v_flex().id("git-graph").relative().size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
-      .on_size_change((size, cx) => { if (size.width !== this.width) { this.width = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => {
+        if (size.width === this.width && size.height === this.height) return;
+        this.width = size.width; this.height = size.height; cx.notify();
+      })
       .child(headerElement(this, t))
       .when(Boolean(d && this.error), (e) => e.child(div().px(12).py(4).text_size(11).text_color(t.ansi1).truncate().child(this.error)))
       .child(d ? this.list(t) : this.message(t))
