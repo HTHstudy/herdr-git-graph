@@ -1,6 +1,15 @@
 # herdr-git-graph
 
-A Herdr mod that recreates the VS Code Git Graph view.
+**English** · [한국어](README.ko.md)
+
+A native recreation of the VS Code Git Graph view for Herdr's side panel, with Git Graph's full
+right-click menus (commit, branch, current branch, remote branch, tag, uncommitted changes and
+stash, including Drop, Fetch into local and Archive) with guards re-checked right before each
+action, click-only confirmation for destructive actions, a per-space Diff tab (or split pane)
+with unified and side-by-side views, a Branches filter dropdown and Find. No code from the
+VS Code Git Graph extension is used. `RECIPE.md` describes how to build it from scratch.
+
+![Git Graph](preview.png)
 
 ## Features (beyond the graph itself)
 
@@ -21,6 +30,9 @@ A Herdr mod that recreates the VS Code Git Graph view.
   double-click acts on the part under the pointer. The checked-out branch's chip is filled
   with its lane color and comes first; HEAD's row has a faint tint of that color.
 - **Double-click a branch label** to check it out (a remote branch opens the Checkout dialog).
+  A single click on a label only selects the row; it doesn't expand it.
+- **Expanding a commit scrolls it into view**: the row and its details come on screen,
+  moving only as far as needed.
 - **Lane colors**: 12 colors from the theme's ansi palette, starting with blue.
 - **Branches dropdown** floats over the graph instead of pushing it down.
 
@@ -70,11 +82,15 @@ which was never edited. Optionally restore `<clone>.json.bak` over the clone (it
 first-run state) or delete the clone. Then delete
 `~/.config/herdr-app/mods/git-graph` and `~/.config/herdr-app/mods/git-graph-tabs`.
 
-## Status
+## Known limits
 
-- ✅ verified: `npm test` (155 passing), including the layout patch on a copy of a real layout and real-git guard tests (stash index shift, moved branch tip, tag named like a branch).
-- ✅ verified: `herdr-app check` passes for `git-graph` and `git-graph-tabs`.
-- ✅ verified: patched `main-copy.json` (a clone) loads with no `*.error` files and empty `errors` in `herdr-app status`.
-- ⏳ needs a manual check: switch to the patched clone and confirm the Files, Changes and Graph buttons (the welcome's `workspace.panels` lists only files and changes; the bar adds Graph when the layout has a `graph` block).
-- ⏳ needs a manual check: the Graph button switches the panel like Changes does, and light/dark theme switching.
-- ⏳ needs a manual check: the rest of the spec done-checklist walked in the live window, including a repo with 10k+ commits (not done, since driving the user's window was not allowed).
+- Windows is not supported: actions run `env GIT_TERMINAL_PROMPT=0 ... git`, and `env` does not exist there.
+- Create Archive is hidden in a space that runs on another machine (its folder picker and file
+  check are local).
+- The Graph button only appears on a layout whose `panel-body` has a `graph` block (the patch adds one).
+- `npm test` covers the pure libraries, the layout patch and real-git guard tests; the panel's
+  drawing itself is checked by hand in a live Herdr window.
+
+## License
+
+MIT, see `LICENSE`.
