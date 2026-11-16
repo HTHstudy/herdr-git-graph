@@ -508,10 +508,14 @@ export class Panel {
     const s = this.repo(d.key);
     this.handle.focus();
     if (item.part === "row") {
-      // The second click of a double-click on a branch label checks it out instead.
-      const hit = this.press?.count >= 2 ? this.labelAt(item.row) : null;
-      if (hit) { s.selected = key; this.checkoutLabel(hit.part.ref, cx); }
-      else this.toggle(key);
+      // A click on a label only selects the row (no details); the second click of a
+      // double-click on a label checks it out. Elsewhere on the row a click expands it.
+      const hit = this.labelAt(item.row);
+      if (!hit) this.toggle(key);
+      else {
+        s.selected = key;
+        if (this.press?.count >= 2) this.checkoutLabel(hit.part.ref, cx);
+      }
     }
     else if (item.part === "hash") {
       cx.write_to_clipboard(item.hash);
