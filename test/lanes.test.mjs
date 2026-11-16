@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { fixture, git } from "./helpers.mjs";
 import { logArgs, stashArgs } from "../mods/git-graph/lib/git.js";
 import { parseLog, parseStashes } from "../mods/git-graph/lib/parse.js";
-import { layoutGraph, MAX_LANES } from "../mods/git-graph/lib/lanes.js";
+import { layoutGraph, MAX_LANES, LANE_PALETTE, laneColorKey } from "../mods/git-graph/lib/lanes.js";
 
 const c = (hash, ...parents) => ({ hash, parents, author: "a", email: "e", date: "d", subject: hash });
 const has = (row, half, from, to) => row.lines.some((l) => l.half === half && l.from === from && l.to === to);
@@ -113,4 +113,17 @@ test("stash with uncommitted row on another head keeps base's natural lane", () 
   assert.notEqual(rows[si].lane, b.lane);
   assert.equal(rows.find((r) => r.hash === "H").lane, 0);
   assert.equal(b.lane, 1);
+});
+
+test("lane palette: 12 colors, blue first; lane colors cycle through all 12", () => {
+  assert.deepEqual(LANE_PALETTE, ["ansi4", "ansi2", "ansi5", "ansi3", "ansi6", "ansi1", "ansi12", "ansi10", "ansi13", "ansi11", "ansi14", "ansi9"]);
+  assert.equal(laneColorKey(0), "ansi4");
+  assert.equal(laneColorKey(6), "ansi12");
+  assert.equal(laneColorKey(12), "ansi4");
+  assert.equal(laneColorKey(-1), "ansi9");
+  // Seven tips side by side: lane 6 now gets its own color (6), not the first lane's again.
+  const tips = ["t0", "t1", "t2", "t3", "t4", "t5", "t6"];
+  const rows = layoutGraph([...tips.map((h) => c(h, "b" + h)), ...tips.map((h) => c("b" + h, "base")), c("base")], [], null, false);
+  assert.deepEqual(rows.slice(0, 7).map((r) => r.lane), [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(rows.slice(0, 7).map((r) => r.color), [0, 1, 2, 3, 4, 5, 6]);
 });

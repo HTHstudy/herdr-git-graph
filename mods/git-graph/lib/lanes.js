@@ -14,7 +14,18 @@
 
 /** Lanes >= MAX_LANES are drawn at lane MAX_LANES - 1. */
 export const MAX_LANES = 12;
-const COLORS = 6;
+/**
+ * Lane colors, by color index: theme keys, starting with blue (lane 0, usually main) and
+ * cycling through 12. Everything that colors by lane maps through this.
+ */
+export const LANE_PALETTE = ["ansi4", "ansi2", "ansi5", "ansi3", "ansi6", "ansi1", "ansi12", "ansi10", "ansi13", "ansi11", "ansi14", "ansi9"];
+const COLORS = LANE_PALETTE.length;
+
+/** The theme key of a lane color index. */
+export function laneColorKey(color) {
+  const n = LANE_PALETTE.length;
+  return LANE_PALETTE[((Number(color) % n) + n) % n] ?? LANE_PALETTE[0];
+}
 
 const cap = (n) => Math.min(n, MAX_LANES - 1);
 
