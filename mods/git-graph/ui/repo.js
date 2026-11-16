@@ -4,15 +4,15 @@ import { READ, logArgs, refsArgs, stashArgs, statusArgs } from "../lib/git.js";
 import { parseLog, parseRefs, parseStashes, parseStatus } from "../lib/parse.js";
 import { layoutGraph } from "../lib/lanes.js";
 import { showUncommitted } from "../lib/filter.js";
+import { pickCwd } from "../lib/location.js";
 
 const TIMEOUT = 30000;
 
 /** The focused folder and machine: the same rule as the shipped `changes` mod. */
 export function location() {
   const space = spaces().find((s) => s.active), f = focused();
-  const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  const cwd = pane?.cwd || f?.cwd || space?.folder;
+  const cwd = pickCwd({ space, focused: f, panes: panes() });
   return { cwd, on, key: JSON.stringify({ cwd, on }) };
 }
 
@@ -32,8 +32,9 @@ const ok = (r, what) => {
  * @param {{branches: string[]|null, remotes: boolean, count: number}} opts
  */
 export async function loadRepo(cwd, on, { branches, remotes, count }) {
-  const top = await git(cwd, on, [...READ, "rev-parse", "--show-toplevel"]);
-  if (top.code !== 0) return { notRepo: true };
+  // exec rejects when the folder no longer exists (ENOENT): that is "not a repo" too.
+  const top = await git(cwd, on, [...READ, "rev-parse", "--show-toplevel"]).catch(() => null);
+  if (!top || top.code !== 0) return { notRepo: true };
   const root = top.stdout.trim();
   const run = (args) => git(root, on, args);
   const [abbrev, full] = await Promise.all([

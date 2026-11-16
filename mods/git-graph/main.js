@@ -1,13 +1,16 @@
 // Role dispatcher by props(): `diff` is the diff pane (one per tab), `menu` the right-click
 // popup, `dialog` an action dialog; anything else the Graph panel.
 import { View } from "gpui-kit";
+import { props as hostProps } from "herdr";
 import { Panel } from "./ui/panel.js";
 import { DiffPane } from "./ui/diff-pane.js";
 import { Menu } from "./ui/menu.js";
 import { Dialog } from "./ui/dialog.js";
 
 export default class GitGraph extends View {
-  init(props, cx) {
+  init(initProps, cx) {
+    // Herdr hands a mod's props (overlay / pane.split) through `props()`, not init's argument.
+    const props = hostProps() ?? initProps;
     this.view = props?.diff?.tab ? new DiffPane() : props?.menu ? new Menu() : props?.dialog ? new Dialog() : new Panel();
     this.view.init(props, cx);
   }
