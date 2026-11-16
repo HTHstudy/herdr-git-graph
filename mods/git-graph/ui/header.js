@@ -114,12 +114,16 @@ export function branchesDropdown(p, t) {
   const entries = branchEntries(d.refs, filter, s.remotes);
   const width = p.width > 0 ? Math.max(120, Math.min(DROP_W, p.width - 16)) : DROP_W;
   const stop = (_e, cx) => cx.stop_propagation();
-  return v_flex().id("gg-branch-list").absolute().top(HEADER_H).left(DROP_LEFT).w(width).max_h(DROP_MAX_H)
-    .overflow_y_scrollbar().py(4).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg()
-    .on_mouse_down("left", stop).on_mouse_down("right", stop)
-    .on_mouse_down_out((_e, cx) => { p.setBranchesOpen(false); cx.notify(); })
+  // The positioned box and the scrolling box are separate: a scrollbar area doesn't keep
+  // absolute positioning (the dropdown fell into the flow under the list).
+  const list = v_flex().id("gg-branch-scroll").w_full().max_h(DROP_MAX_H).overflow_y_scrollbar().py(4)
     .child(checkRow("gg-br-all", t, !filter, "Show All", (_v, cx) => { p.setBranchesOpen(false); p.setBranches(null, cx); }))
     .children(entries.map((en) => checkRow("gg-br-" + en.name, t, en.checked,
       en.kind === "remote" ? div().text_color(t.muted).child(en.label) : en.label,
       (_v, cx) => p.toggleBranch(en.name, cx))));
+  return div().id("gg-branch-list").absolute().top(HEADER_H).left(DROP_LEFT).w(width)
+    .bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg().overflow_hidden()
+    .on_mouse_down("left", stop).on_mouse_down("right", stop)
+    .on_mouse_down_out((_e, cx) => { p.setBranchesOpen(false); cx.notify(); })
+    .child(list);
 }
