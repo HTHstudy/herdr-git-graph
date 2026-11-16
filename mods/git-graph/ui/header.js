@@ -1,5 +1,5 @@
 // The Graph panel's header: title + branch + busy spinner, Fetch / Refresh, the Branches
-// dropdown (an inline list under the header), Show Remote Branches, and Find.
+// dropdown (a layer floating over the graph, see branchesDropdown), Show Remote Branches, and Find.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, Checkbox } from "gpui-base";
 import { runPlan, busyOf } from "./run.js";
@@ -72,7 +72,11 @@ export function headerElement(p, t) {
     .child(button("gg-branches", t, {
       name: "branch", compact: false, active: p.branchesOpen || Boolean(filter),
       label: (compact ? "" : "Branches: ") + filterLabel(filter) + " ▾",
-      onClick: (_e, cx) => { p.branchesOpen = !p.branchesOpen; cx.notify(); },
+      onClick: (_e, cx) => {
+        // A press here first closed it (on_mouse_down_out): that press must not reopen it.
+        if (!p.branchesOpen && Date.now() - (p.branchesClosedAt ?? 0) < CLOSE_GRACE) return;
+        p.setBranchesOpen(!p.branchesOpen); cx.notify();
+      },
     }).max_w(compact ? 120 : 200).min_w(0))
     .child(Checkbox.new("gg-remotes").checked(s.remotes).on_change((v, cx) => p.setRemotes(v, cx))
       .flex_none().h(24).px(4).flex().items_center().gap(5).rounded(6).hover((st) => st.bg(t.hover))
@@ -87,13 +91,35 @@ export function headerElement(p, t) {
       .when(Boolean(count), (e) => e.child(div().flex_none().text_size(11)
         .text_color(matches.length ? t.muted : t.ansi1).child(count))));
 
-  const out = v_flex().flex_none().border_b(1).border_color(t.border).child(title).child(controls);
-  if (!p.branchesOpen) return out;
+  return v_flex().flex_none().border_b(1).border_color(t.border).child(title).child(controls);
+}
+
+/** Header height with its controls row and bottom border: where the dropdown hangs. */
+export const HEADER_H = 36 + 34 + 1;
+const DROP_W = 260, DROP_MAX_H = 320, DROP_LEFT = 12;
+/** How long after an outside press closed the dropdown the Branches button won't reopen it. */
+const CLOSE_GRACE = 300;
+
+/**
+ * The Branches dropdown, floating over the graph (null when closed): an absolute layer in the
+ * panel's (relative) root, under the Branches button. Show All closes it; the checkboxes keep it
+ * open. A press outside closes it; presses inside don't reach the list beneath.
+ * @param {any} p the Panel
+ * @param {Record<string,string>} t
+ */
+export function branchesDropdown(p, t) {
+  const d = p.status === "ready" ? p.data : null;
+  if (!d || !p.branchesOpen) return null;
+  const s = p.repo(d.key), filter = s.branches;
   const entries = branchEntries(d.refs, filter, s.remotes);
-  return out.child(v_flex().id("gg-branch-list").flex_none().max_h(240).overflow_y_scrollbar().py(4)
-    .border_t(1).border_color(t.border).bg(t.surface)
-    .child(checkRow("gg-br-all", t, !filter, "Show All", (_v, cx) => p.setBranches(null, cx)))
+  const width = p.width > 0 ? Math.max(120, Math.min(DROP_W, p.width - 16)) : DROP_W;
+  const stop = (_e, cx) => cx.stop_propagation();
+  return v_flex().id("gg-branch-list").absolute().top(HEADER_H).left(DROP_LEFT).w(width).max_h(DROP_MAX_H)
+    .overflow_y_scrollbar().py(4).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg()
+    .on_mouse_down("left", stop).on_mouse_down("right", stop)
+    .on_mouse_down_out((_e, cx) => { p.setBranchesOpen(false); cx.notify(); })
+    .child(checkRow("gg-br-all", t, !filter, "Show All", (_v, cx) => { p.setBranchesOpen(false); p.setBranches(null, cx); }))
     .children(entries.map((en) => checkRow("gg-br-" + en.name, t, en.checked,
       en.kind === "remote" ? div().text_color(t.muted).child(en.label) : en.label,
-      (_v, cx) => p.toggleBranch(en.name, cx)))));
+      (_v, cx) => p.toggleBranch(en.name, cx))));
 }

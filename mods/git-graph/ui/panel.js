@@ -5,7 +5,7 @@ import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, 
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow, laneColor } from "./graph-cell.js";
 import { detailElement } from "./details.js";
-import { headerElement, fetchAll, busyOf } from "./header.js";
+import { headerElement, branchesDropdown, fetchAll, busyOf } from "./header.js";
 import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT, CHIP_ICON, CHIP_ICON_SLOT } from "../lib/format.js";
 import { menuFor, dropChecks, planFor, dialogFor } from "../lib/actions.js";
 import { openDialog } from "./menu.js";
@@ -324,6 +324,12 @@ export class Panel {
     cx.notify();
   }
 
+  /** Open / close the floating Branches dropdown (a close is timed: see the Branches button). */
+  setBranchesOpen(open) {
+    if (this.branchesOpen && !open) this.branchesClosedAt = Date.now();
+    this.branchesOpen = open;
+  }
+
   /** Branches dropdown: the filter, null = Show All. */
   setBranches(filter, cx) {
     this.reloadWith((s) => { s.branches = filter; }, cx);
@@ -570,7 +576,7 @@ export class Panel {
 
   key(e, cx) {
     if (this.finding) return; // the Find box has the keyboard: its keys are its own
-    if (e.keystroke === "escape" && this.branchesOpen) { this.branchesOpen = false; cx.stop_propagation(); cx.notify(); return; }
+    if (e.keystroke === "escape" && this.branchesOpen) { this.setBranchesOpen(false); cx.stop_propagation(); cx.notify(); return; }
     const c = e.keystroke === "up" ? "up" : e.keystroke === "down" ? "down" : e.keystroke === "enter" ? "toggle"
       : e.keystroke === "escape" ? "collapse" : e.key === "/" || e.key_char === "/" ? "find" : null;
     if (!c || !this.command(c, cx)) return;
@@ -725,12 +731,14 @@ export class Panel {
     this.ensureDetail(cx);
     const t = theme(), d = this.status === "ready" ? this.data : null;
     this.matches(); // keeps the row highlights' match set current
-    return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
+    const dropdown = branchesDropdown(this, t);
+    return v_flex().id("git-graph").relative().size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13)
       .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .on_size_change((size, cx) => { if (size.width !== this.width) { this.width = size.width; cx.notify(); } })
       .child(headerElement(this, t))
       .when(Boolean(d && this.error), (e) => e.child(div().px(12).py(4).text_size(11).text_color(t.ansi1).truncate().child(this.error)))
-      .child(d ? this.list(t) : this.message(t));
+      .child(d ? this.list(t) : this.message(t))
+      .when(Boolean(dropdown), (e) => e.child(dropdown)); // last: drawn over the list
   }
 }
