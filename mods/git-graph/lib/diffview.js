@@ -129,3 +129,74 @@ export function splitFrom(list, tab, focusedPane) {
 export function gitGraphPanes(list, tab) {
   return list.filter((p) => isDiffPane(p, tab)).map((p) => p.pane);
 }
+
+// ---- tab mode: one diff tab per space ---------------------------------------
+// Its pane's props().diff.tab is `space:<spaceId>` (not a tab id), so the target lives at
+// `git-graph.diff.space:<spaceId>`; the tab is recorded as `git-graph.diffTab.<spaceId>` = {tab, pane}.
+
+const SPACE = "space:";
+
+/** Where a file click opens its diff: "tab" (default) or "split" (beside the work). */
+export function diffWhere(value) {
+  return value === "split" ? "split" : "tab";
+}
+
+/** The diff key of a space's diff tab. */
+export function spaceKey(spaceId) {
+  return SPACE + spaceId;
+}
+
+/** The space id of a tab-mode key, or null for a split pane's key (a tab id). */
+export function keySpace(key) {
+  return typeof key === "string" && key.startsWith(SPACE) ? key.slice(SPACE.length) : null;
+}
+
+const tabsOf = (spaceList, spaceId) => spaceList.find((s) => s.id === spaceId)?.tabs ?? [];
+
+/** The tab's pane when it is the tab's only pane and a git-graph one, else null. */
+function soleGitGraphPane(list, tab) {
+  const ps = list.filter((p) => p.tab === tab);
+  return ps.length === 1 && ps[0].mod === "git-graph" ? ps[0].pane : null;
+}
+
+/**
+ * The space's diff tab: the record while its tab is still in the space and its pane still a
+ * git-graph pane of that tab (a shell split in beside it is fine); else, when the space has
+ * exactly one tab whose only pane is a git-graph pane other than `exclude` (the focused pane,
+ * which may be the Graph itself), that one (after a restart ids can change). Null: open one.
+ * @returns {{tab: string, pane: string}|null}
+ */
+export function findDiffTab(spaceList, list, spaceId, stored, exclude = null) {
+  const tabs = tabsOf(spaceList, spaceId);
+  if (stored?.tab && stored?.pane && tabs.some((t) => t.id === stored.tab)
+    && list.some((p) => p.pane === stored.pane && p.tab === stored.tab && p.mod === "git-graph")) {
+    return { tab: stored.tab, pane: stored.pane };
+  }
+  const found = [];
+  for (const t of tabs) {
+    const pane = soleGitGraphPane(list, t.id);
+    if (pane && pane !== exclude) found.push({ tab: t.id, pane });
+  }
+  return found.length === 1 ? found[0] : null;
+}
+
+/** After tab.new: the space's tab that wasn't there before, once its only pane (git-graph) shows. */
+export function newDiffTab(spaceList, list, spaceId, beforeTabs) {
+  const old = new Set(beforeTabs);
+  for (const t of tabsOf(spaceList, spaceId)) {
+    if (old.has(t.id)) continue;
+    const pane = soleGitGraphPane(list, t.id);
+    if (pane) return { tab: t.id, pane };
+  }
+  return null;
+}
+
+/** The space's tab ids (taken before tab.new). */
+export function spaceTabs(spaceList, spaceId) {
+  return tabsOf(spaceList, spaceId).map((t) => t.id);
+}
+
+/** Same {tab, pane} record (null-safe). */
+export function sameDiffTab(a, b) {
+  return (a?.tab ?? null) === (b?.tab ?? null) && (a?.pane ?? null) === (b?.pane ?? null);
+}

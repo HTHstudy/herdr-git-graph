@@ -22,3 +22,19 @@ test("pickCwd: terminal of another tab is not used", () => {
 test("pickCwd: layout terminal block (pane null) uses focused cwd", () => {
   assert.equal(pickCwd({ space, focused: { pane: null, tab: "t1", cwd: "/block" }, panes: [term] }), "/block");
 });
+
+test("pickCwd keep: a focused git-graph pane keeps the current location (null)", () => {
+  assert.equal(pickCwd({ space, focused: { pane: "p2", tab: "t1" }, panes: [term, diff], keep: true }), null);
+  // A diff tab: its only pane is the git-graph pane, no terminal anywhere in the tab.
+  const tabDiff = { ...diff, tab: "t2" };
+  assert.equal(pickCwd({ space, focused: { pane: "p2", tab: "t2" }, panes: [term, tabDiff], keep: true }), null);
+  // Without a current location there is nothing to keep: the usual fallback.
+  assert.equal(pickCwd({ space, focused: { pane: "p2", tab: "t2" }, panes: [term, tabDiff] }), "/gone");
+});
+
+test("pickCwd keep: terminals and other mods' panes still switch", () => {
+  assert.equal(pickCwd({ space, focused: { pane: "p1", tab: "t1" }, panes: [term, diff], keep: true }), "/repo");
+  const other = { ...diff, pane: "p3", mod: "editor" };
+  assert.equal(pickCwd({ space, focused: { pane: "p3", tab: "t1" }, panes: [term, other], keep: true }), "/repo");
+  assert.equal(pickCwd({ space, focused: { pane: null, tab: "t1", cwd: "/block" }, panes: [term], keep: true }), "/block");
+});

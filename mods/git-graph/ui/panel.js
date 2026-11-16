@@ -1,7 +1,7 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
-import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, run, notify, openOverlay } from "herdr";
+import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, spaces, run, notify, openOverlay } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow } from "./graph-cell.js";
 import { detailElement } from "./details.js";
@@ -14,15 +14,15 @@ import { runPlan, failedGuard } from "./run.js";
 import { commitInfoArgs, commitFilesArgs, commitStatusArgs } from "../lib/git.js";
 import { parseCommitInfo, parseNumstat, parseNameStatus } from "../lib/parse.js";
 import { detailItems, commitFiles, commitTarget, uncommittedTarget, pruneState } from "../lib/details.js";
-import { existingDiffPane, splitFrom, newDiffPane, gitGraphPanes } from "../lib/diffview.js";
-import { paneKey, diffKey } from "./diff-pane.js";
+import { existingDiffPane, splitFrom, newDiffPane, gitGraphPanes, diffWhere, spaceKey, findDiffTab, newDiffTab, spaceTabs, sameDiffTab } from "../lib/diffview.js";
+import { paneKey, diffKey, tabKey } from "./diff-pane.js";
 import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
 
 export const ROW_HEIGHT = 26;
 const PAGE = 300;
 /** Loaded commit details kept for instant re-expanding. */
 const DETAIL_CACHE = 50;
-/** How long a fresh split may take to show in panes(). */
+/** How long a fresh split (or diff tab) may take to show in panes() / spaces(). */
 const SPLIT_WAIT = 2000;
 
 export class Panel {
@@ -45,8 +45,8 @@ export class Panel {
     /** Find: the query (for every repo), the current match's hash, whether the box has the keyboard. */
     this.query = ""; this.findCur = null; this.finding = false; this.findCache = null;
     this.branchesOpen = false;
-    /** A diff pane split in flight: {tab, at}. */
-    this.splitting = null;
+    /** A diff pane split in flight: {tab, at}; a diff tab being opened: {space, at}. */
+    this.splitting = null; this.opening = null;
     this.find = InputState.new({ placeholder: "Find" });
     this.find.on("change", (_e, cx) => this.setQuery(this.find.value(), cx));
     this.find.on("submit", (e, cx) => this.stepFind(e?.shift ? -1 : 1, cx));
@@ -75,7 +75,7 @@ export class Panel {
   }
 
   current(context) {
-    return this.context === context && location().key === context;
+    return this.context === context && location(this.context).key === context;
   }
 
   watch(root, on, cx) {
@@ -99,7 +99,7 @@ export class Panel {
   }
 
   refresh(cx) {
-    const { cwd, on, key } = location(), context = key;
+    const { cwd, on, key } = location(this.context), context = key;
     // Reset before the in-flight check: a focus change mid-load must not keep showing the old repo.
     if (context !== this.context) {
       this.context = context; this.data = null; this.status = "loading"; this.error = null; this.branchesOpen = false;
@@ -235,12 +235,50 @@ export class Panel {
     if (key && this.details.get(key)?.state === "error") this.details.delete(key);
   }
 
-  /**
-   * Show a file's diff in this tab's diff pane: the target goes to the tab's shared key
-   * (the pane follows it), and the pane is split in on the right unless the tab has one.
-   */
+  /** Show a file's diff where `git-graph.diffWhere` says: the space's diff tab (default) or a split. */
   openDiff(target, cx) {
-    const f = focused(), tab = f?.tab; // before any await: the person may switch tabs
+    const f = focused(); // before any await: the person may switch tabs
+    if (diffWhere(shared("git-graph.diffWhere")) === "tab") this.openDiffTab(target, f, cx);
+    else this.openDiffSplit(target, f, cx);
+  }
+
+  /**
+   * Tab mode: the target goes to `git-graph.diff.space:<id>`; the space's diff tab (recorded as
+   * `git-graph.diffTab.<id>`) is selected, or opened with tab.new when the space has none.
+   */
+  openDiffTab(target, f, cx) {
+    const space = f?.space;
+    if (!space) return;
+    setShared(diffKey(spaceKey(space)), target);
+    const sp = spaces(), list = panes(), stored = shared(tabKey(space));
+    const existing = findDiffTab(sp, list, space, stored, f.pane);
+    if (existing) {
+      if (!sameDiffTab(existing, stored)) setShared(tabKey(space), existing);
+      run("tab.select", { id: existing.tab });
+      return;
+    }
+    // A tab asked for a moment ago may not be in spaces() yet: don't open a second one.
+    if (this.opening?.space === space && Date.now() - this.opening.at < SPLIT_WAIT) return;
+    const before = spaceTabs(sp, space), mark = { space, at: Date.now() };
+    this.opening = mark;
+    run("tab.new", { space, name: "Diff", mod: "git-graph", props: { diff: { tab: spaceKey(space) } } });
+    cx.spawn(async (cx) => {
+      const end = Date.now() + SPLIT_WAIT;
+      while (Date.now() < end) {
+        const found = newDiffTab(spaces(), panes(), space, before);
+        if (found) { setShared(tabKey(space), found); break; }
+        await cx.sleep(20);
+      }
+      if (this.opening === mark) this.opening = null;
+    });
+  }
+
+  /**
+   * Split mode: the target goes to the tab's shared key (the pane follows it), and the pane
+   * is split in on the right unless the tab has one.
+   */
+  openDiffSplit(target, f, cx) {
+    const tab = f?.tab;
     if (!tab) return;
     setShared(diffKey(tab), target);
     const list = panes(), stored = shared(paneKey(tab));
@@ -603,7 +641,7 @@ export class Panel {
   }
 
   render(cx) {
-    if (location().key !== this.context) this.refresh(cx);
+    if (location(this.context).key !== this.context) this.refresh(cx);
     const changed = shared("git-graph.changed");
     if (changed && changed.at !== this.seenChanged) {
       this.seenChanged = changed.at;

@@ -1,20 +1,26 @@
-// The diff pane: one per tab, beside the work. Shows `shared("git-graph.diff.<tab>")`.
+// The diff pane: one per tab, beside the work (split mode, props().diff.tab = the tab id), or
+// alone in the space's diff tab (tab mode, props().diff.tab = "space:<spaceId>").
+// Shows `shared("git-graph.diff.<key>")`.
 // Draws its own line rows (per-line +/- backgrounds), no token syntax highlighting.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
 import { theme, settings, shared, setShared, panes, spaces, focused, run, exec, appHome, readTextFile, notify, nextCommand } from "herdr";
 import { git } from "./repo.js";
 import { diffArgs } from "../lib/diff.js";
-import { sameTarget, targetLabel, absPath, diffOutcome, diffRows, gutterDigits, diffPaneOf, gitGraphPanes } from "../lib/diffview.js";
+import { sameTarget, targetLabel, absPath, diffOutcome, diffRows, gutterDigits, diffPaneOf, gitGraphPanes, keySpace, findDiffTab, sameDiffTab, diffWhere } from "../lib/diffview.js";
 
 const LINE = 20;
 export const diffKey = (tab) => "git-graph.diff." + tab;
 export const paneKey = (tab) => "git-graph.diffPane." + tab;
+/** Tab mode: the space's diff tab, {tab, pane}. */
+export const tabKey = (space) => "git-graph.diffTab." + space;
 const nvimBin = () => `${appHome()}/mods/herdr-nvim/bin/herdr-nvim`;
 
 export class DiffPane {
   init(props, cx) {
     this.tab = props.diff.tab;
+    /** Tab mode: the space whose diff tab this is (null: a split pane of tab `this.tab`). */
+    this.space = keySpace(this.tab);
     /** The target the shown result belongs to, and its load state. */
     this.target = null; this.state = "empty"; this.result = null; this.error = null;
     this.rowsCache = null; this.loadGen = 0; this.grabbed = false;
@@ -36,8 +42,17 @@ export class DiffPane {
     this.adopt();
   }
 
+  /** Tab mode: this space's diff tab {tab, pane}, verified (re-recorded when found anew), or null. */
+  diffTab() {
+    const stored = shared(tabKey(this.space));
+    const found = findDiffTab(spaces(), panes(), this.space, stored);
+    if (found && !sameDiffTab(found, stored)) setShared(tabKey(this.space), found);
+    return found;
+  }
+
   /** After a restart (pane ids may change) the tab's only git-graph pane is this one: record it. */
   adopt() {
+    if (this.space) { this.diffTab(); return; }
     const list = panes();
     if (diffPaneOf(list, this.tab, shared(paneKey(this.tab)))) return;
     const mine = gitGraphPanes(list, this.tab);
@@ -46,6 +61,7 @@ export class DiffPane {
 
   /** This pane's id: the recorded one, else the focused pane when it is a git-graph pane of the tab. */
   paneId() {
+    if (this.space) return this.diffTab()?.pane ?? null;
     const list = panes(), stored = diffPaneOf(list, this.tab, shared(paneKey(this.tab)));
     if (stored) return stored;
     const f = focused()?.pane;
@@ -58,13 +74,22 @@ export class DiffPane {
    */
   grab(cx) {
     if (this.grabbed || this.state === "loading" || this.state === "empty") return;
-    const mine = diffPaneOf(panes(), this.tab, shared(paneKey(this.tab)));
+    const mine = this.space ? shared(tabKey(this.space))?.pane : diffPaneOf(panes(), this.tab, shared(paneKey(this.tab)));
     if (!mine || focused()?.pane !== mine) return;
     this.grabbed = true;
     cx.spawn(async () => { this.handle.focus(); });
   }
 
+  /** Esc / ✕: a split pane closes; in tab mode the diff tab closes. */
   close() {
+    if (this.space) {
+      const tab = this.diffTab()?.tab;
+      if (tab) { run("tab.close", { id: tab }); return; }
+      // Not recorded (or ambiguous): the focused pane when it is a git-graph one (this pane, here).
+      const f = focused()?.pane;
+      if (f && panes().some((p) => p.pane === f && p.mod === "git-graph")) run("pane.close", { pane: f });
+      return;
+    }
     const pane = this.paneId();
     if (pane) run("pane.close", { pane });
   }
@@ -103,8 +128,9 @@ export class DiffPane {
   openInNvim() {
     const t = this.target;
     if (!t) return;
-    const space = spaces().find((s) => s.tabs?.some((x) => x.id === this.tab))?.id ?? focused()?.space;
-    const ctx = JSON.stringify({ space, tab: this.tab, terminal: null, cwd: null });
+    const tab = this.space ? this.diffTab()?.tab ?? focused()?.tab : this.tab;
+    const space = this.space ?? spaces().find((s) => s.tabs?.some((x) => x.id === tab))?.id ?? focused()?.space;
+    const ctx = JSON.stringify({ space, tab, terminal: null, cwd: null });
     exec(nvimBin(), ["open", absPath(t), "--ctx", ctx]).then((r) => {
       if (r.code !== 0) notify({ title: "herdr-nvim open failed", body: (r.stderr || r.stdout).trim().slice(-400), level: "error" });
     }, (e) => notify({ title: "herdr-nvim open failed", body: String(e?.message ?? e), level: "error" }));
@@ -128,11 +154,18 @@ export class DiffPane {
     const seg = h_flex().flex_none().rounded(6).border_1().border_color(t.border).p(1).gap(1)
       .child(this.button("dm-unified", t, () => setShared("git-graph.diffMode", "unified"), mode === "unified").child("Unified"))
       .child(this.button("dm-split", t, () => setShared("git-graph.diffMode", "split"), mode === "split").child("Split"));
+    const where = diffWhere(shared("git-graph.diffWhere"));
+    const open = h_flex().flex_none().gap(4).items_center()
+      .child(div().text_size(11).text_color(t.dim).child("Open in:"))
+      .child(h_flex().rounded(6).border_1().border_color(t.border).p(1).gap(1)
+        .child(this.button("dw-tab", t, () => setShared("git-graph.diffWhere", "tab"), where === "tab").child("Tab"))
+        .child(this.button("dw-split", t, () => setShared("git-graph.diffWhere", "split"), where === "split").child("Pane")));
     return h_flex().w_full().flex_none().h(36).px(10).gap(8).items_center().border_b_1().border_color(t.border).bg(t.surface)
       .child(v_flex().flex_1().min_w(0)
         .child(div().truncate().text_size(13).child(tg ? (tg.from ? `${tg.from} → ${tg.path}` : tg.path) : "Diff"))
         .when(Boolean(tg), (e) => e.child(div().truncate().text_size(11).text_color(t.dim).child(targetLabel(tg)))))
       .when(Boolean(tg), (e) => e.child(seg))
+      .child(open)
       .when(Boolean(canOpen), (e) => e.child(this.button("dm-nvim", t, () => this.openInNvim()).child("Open in nvim")))
       .child(this.button("dm-close", t, () => this.close()).w(22).px(0).justify_center().child("✕"));
   }

@@ -2,6 +2,19 @@
 
 A Herdr mod that recreates the VS Code Git Graph view.
 
+## Features (beyond the graph itself)
+
+- **Copy Commit Message / Copy Stash Message to Clipboard** in the right-click menu: the
+  full message (subject and body), read with `git log -1 --format=%B` when chosen.
+- **Selectable commit details**: in an expanded commit, the message body and the
+  Author / Committer / Date values can be drag-selected and copied with cmd-c. The full
+  hash stays click-to-copy.
+- **Diff in its own tab** (default): clicking a file opens the space's one **Diff** tab
+  (opened on first use, reused after that). The diff header's **Open in: Tab | Pane**
+  toggle switches to the old behavior, a diff pane split in beside the work; the choice is
+  shared (`git-graph.diffWhere` = `tab` | `split`). Esc or ✕ closes the diff tab (or pane).
+  While a diff tab or pane has the focus, the Graph keeps showing its repository.
+
 ## Install (development)
 
 ```sh
@@ -50,7 +63,7 @@ first-run state) or delete the clone. Then delete
 
 ## Status
 
-- ✅ verified: `npm test` (127 passing), including the layout patch on a copy of a real layout and real-git guard tests (stash index shift, moved branch tip, tag named like a branch).
+- ✅ verified: `npm test` (143+ passing), including the layout patch on a copy of a real layout and real-git guard tests (stash index shift, moved branch tip, tag named like a branch).
 - ✅ verified: `herdr-app check` passes for `git-graph` and `git-graph-tabs`.
 - ✅ verified: patched `main-copy.json` (a clone) loads with no `*.error` files and empty `errors` in `herdr-app status`.
 - ⏳ needs a manual check: switch to the patched clone and confirm the Files, Changes and Graph buttons (the welcome's `workspace.panels` lists only files and changes; the bar adds Graph when the layout has a `graph` block).

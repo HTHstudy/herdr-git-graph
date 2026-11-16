@@ -8,11 +8,15 @@ import { pickCwd } from "../lib/location.js";
 
 const TIMEOUT = 30000;
 
-/** The focused folder and machine: the same rule as the shipped `changes` mod. */
-export function location() {
+/**
+ * The focused folder and machine: the same rule as the shipped `changes` mod. `current`: the
+ * panel's location key, kept while a git-graph pane (a diff tab or pane) has the focus.
+ */
+export function location(current = null) {
   const space = spaces().find((s) => s.active), f = focused();
+  const cwd = pickCwd({ space, focused: f, panes: panes(), keep: current !== null });
+  if (cwd === null) return { ...JSON.parse(current), key: current };
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  const cwd = pickCwd({ space, focused: f, panes: panes() });
   return { cwd, on, key: JSON.stringify({ cwd, on }) };
 }
 

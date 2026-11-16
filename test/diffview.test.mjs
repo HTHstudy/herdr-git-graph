@@ -5,6 +5,7 @@ import { diffArgs } from "../mods/git-graph/lib/diff.js";
 import {
   sameTarget, targetLabel, absPath, deletesFile, diffOutcome, diffRows, gutterDigits,
   diffPaneOf, newDiffPane, gitGraphPanes, existingDiffPane, splitFrom,
+  diffWhere, spaceKey, keySpace, findDiffTab, newDiffTab, spaceTabs, sameDiffTab,
 } from "../mods/git-graph/lib/diffview.js";
 
 const T = (o) => ({ root: "/r", on: null, commit: null, parent: null, path: "f", from: null, area: null, ...o });
@@ -138,4 +139,62 @@ test("splitFrom picks an explicit pane", () => {
   const unfocused = list.map((p) => ({ ...p, focused: false }));
   assert.equal(splitFrom(unfocused, "t1", null), "sh1"); // first non-mod pane
   assert.equal(splitFrom([list[0]], "t1", "gg"), null);
+});
+
+test("diffWhere: tab by default, split only when asked", () => {
+  assert.equal(diffWhere(undefined), "tab");
+  assert.equal(diffWhere("tab"), "tab");
+  assert.equal(diffWhere("bogus"), "tab");
+  assert.equal(diffWhere("split"), "split");
+});
+
+test("spaceKey / keySpace", () => {
+  assert.equal(spaceKey("s1"), "space:s1");
+  assert.equal(keySpace(spaceKey("mac/s1")), "mac/s1");
+  assert.equal(keySpace("t1"), null);
+  assert.equal(keySpace(undefined), null);
+});
+
+const SP = [
+  { id: "s1", tabs: [{ id: "t1" }, { id: "t2" }, { id: "t3" }] },
+  { id: "s2", tabs: [{ id: "t9" }] },
+];
+const P = [
+  { pane: "p1", tab: "t1", mod: undefined },
+  { pane: "pg", tab: "t1", mod: "git-graph" }, // a split diff pane beside a shell: not a diff tab
+  { pane: "pd", tab: "t2", mod: "git-graph" }, // the diff tab
+  { pane: "p3", tab: "t3", mod: undefined },
+  { pane: "px", tab: "t9", mod: "git-graph" },
+];
+
+test("findDiffTab: a valid record wins", () => {
+  assert.deepEqual(findDiffTab(SP, P, "s1", { tab: "t2", pane: "pd" }), { tab: "t2", pane: "pd" });
+  // A shell split in beside the diff pane: still the space's diff tab.
+  const withShell = [...P, { pane: "p4", tab: "t2" }];
+  assert.deepEqual(findDiffTab(SP, withShell, "s1", { tab: "t2", pane: "pd" }), { tab: "t2", pane: "pd" });
+});
+
+test("findDiffTab: stale record falls back to the space's one lone git-graph tab", () => {
+  assert.deepEqual(findDiffTab(SP, P, "s1", { tab: "t2", pane: "gone" }), { tab: "t2", pane: "pd" });
+  assert.deepEqual(findDiffTab(SP, P, "s1", null), { tab: "t2", pane: "pd" });
+  assert.deepEqual(findDiffTab(SP, P, "s1", { tab: "t9", pane: "px" }), { tab: "t2", pane: "pd" }, "another space's tab is not this space's");
+  assert.equal(findDiffTab(SP, P, "s1", null, "pd"), null, "the focused pane (maybe the Graph itself) is excluded");
+  const two = [...P, { pane: "pe", tab: "t3", mod: "git-graph" }].filter((p) => p.pane !== "p3");
+  assert.equal(findDiffTab(SP, two, "s1", null), null, "ambiguous: open a new one");
+  assert.equal(findDiffTab(SP, P, "nope", null), null);
+});
+
+test("newDiffTab: the new tab once its lone git-graph pane shows", () => {
+  const before = spaceTabs(SP, "s1");
+  assert.deepEqual(before, ["t1", "t2", "t3"]);
+  assert.equal(newDiffTab(SP, P, "s1", before), null);
+  const sp2 = [{ id: "s1", tabs: [...SP[0].tabs, { id: "t4" }] }];
+  assert.equal(newDiffTab(sp2, P, "s1", before), null, "tab there, pane not yet");
+  assert.deepEqual(newDiffTab(sp2, [...P, { pane: "pn", tab: "t4", mod: "git-graph" }], "s1", before), { tab: "t4", pane: "pn" });
+});
+
+test("sameDiffTab", () => {
+  assert.ok(sameDiffTab({ tab: "a", pane: "b" }, { tab: "a", pane: "b" }));
+  assert.ok(sameDiffTab(null, undefined));
+  assert.ok(!sameDiffTab({ tab: "a", pane: "b" }, null));
 });
