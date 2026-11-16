@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { graphWidth, visibleColumns, relativeDate, refChips, laneX, chipWidth, chipAt, chipText, textColumns, pointerScale, CHIP_GAP, CHIP_COLS } from "../mods/git-graph/lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, laneX, chipWidth, chipAt, chipPartAt, chipParts, partWidth, chipText, textColumns, pointerScale, CHIP_GAP, CHIP_COLS, CURRENT_MARK } from "../mods/git-graph/lib/format.js";
 
 test("graphWidth counts lanes from rows and lines, capped at 12", () => {
   assert.equal(graphWidth([]), 24);
@@ -56,7 +56,7 @@ test("refChips groups by hash, current branch first and bold", () => {
 
 test("refChips adds a bold HEAD chip when detached", () => {
   const m = refChips([ref("x", "head", "main")], null, "y");
-  assert.deepEqual(m.get("y"), [{ label: "HEAD", kind: "head", bold: true, ref: null }]);
+  assert.deepEqual(m.get("y"), [{ label: "HEAD", kind: "head", bold: true, ref: null, current: false, detached: true }]);
   assert.equal(m.get("x")[0].bold, false);
 });
 
@@ -103,4 +103,32 @@ test("pointerScale: item height over layout height, else zoom, else 1", () => {
   assert.equal(pointerScale({ height: 0 }, 26, 1.25), 1.25);
   assert.equal(pointerScale({ height: 9999 }, 26, undefined), 1, "implausible height ignored");
   assert.equal(pointerScale(null, 26, "x"), 1);
+});
+
+test("current branch: ✓ mark first, one column, width exact; it leads the row's chips", () => {
+  const refs = [
+    { hash: "a", kind: "tag", short: "v1", current: false },
+    { hash: "a", kind: "head", short: "topic", current: false },
+    { hash: "a", kind: "head", short: "main", current: true },
+  ];
+  const [cur, other] = refChips(refs, "main", "a").get("a");
+  assert.equal(cur.label, "main");
+  assert.ok(cur.current && !other.current);
+  assert.equal(textColumns(CURRENT_MARK), 2);
+  assert.equal(chipParts(cur)[0].text, "✓ main");
+  assert.equal(chipWidth(cur), Math.ceil(10 + 6 * 6.6) + 2);
+  assert.equal(chipWidth(other), chipWidth("topic"));
+  // Detached: the HEAD chip, not marked current.
+  const det = refChips(refs.map((r) => ({ ...r, current: false })), null, "a").get("a")[0];
+  assert.ok(det.detached && !det.current);
+  assert.equal(chipParts(det)[0].text, "HEAD");
+});
+
+test("chipPartAt: one-part chips name their ref", () => {
+  const refs = [{ hash: "a", kind: "head", short: "main", current: true }, { hash: "a", kind: "tag", short: "v1", current: false }];
+  const chips = refChips(refs, "main", "a").get("a");
+  const hit = chipPartAt(chips, 10 + chipWidth(chips[0]) + CHIP_GAP + 1, 10);
+  assert.equal(hit.chip, chips[1]);
+  assert.equal(hit.part.ref, refs[1]);
+  assert.equal(chipPartAt(chips, 11, 10).part.ref, refs[0]);
 });

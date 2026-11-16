@@ -53,14 +53,18 @@ export function relativeDate(unix, now) {
 }
 
 /**
- * @typedef {{label:string, kind:"head"|"remote"|"tag", bold:boolean, ref:object|null}} Chip
+ * A ref chip. `current`: the checked-out branch (drawn filled with its lane color, "✓" first);
+ * `detached`: the "HEAD" chip of a detached HEAD (filled with the accent).
+ * @typedef {{label:string, kind:"head"|"remote"|"tag", bold:boolean, ref:object|null, current?:boolean, detached?:boolean}} Chip
+ * One drawn part of a chip: its text and the ref it names (null: detached HEAD).
+ * @typedef {{text:string, ref:object|null, kind:string}} ChipPart
  */
 
 const ORDER = { head: 0, remote: 1, tag: 2 };
 
 /**
  * Ref chips grouped by the commit hash they draw on (tags already peeled by parseRefs).
- * The current branch comes first and is bold; when detached, a bold "HEAD" chip leads on headHash.
+ * The current branch comes first; when detached, a "HEAD" chip leads on headHash.
  * @param {{hash:string, kind:"head"|"remote"|"tag", short:string, current:boolean}[]} refs
  * @param {string|null} head current branch name, null when detached
  * @param {string|null} headHash
@@ -73,11 +77,14 @@ export function refChips(refs, head, headHash) {
     if (!out.has(hash)) out.set(hash, []);
     out.get(hash).push(chip);
   };
-  if (head === null && headHash) add(headHash, { label: "HEAD", kind: "head", bold: true, ref: null });
+  if (head === null && headHash) add(headHash, { label: "HEAD", kind: "head", bold: true, ref: null, current: false, detached: true });
   const sorted = refs
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(b.r.current) - Number(a.r.current) || ORDER[a.r.kind] - ORDER[b.r.kind] || a.i - b.i);
-  for (const { r } of sorted) add(r.hash, { label: r.short, kind: r.kind, bold: Boolean(r.current && head !== null), ref: r });
+  for (const { r } of sorted) {
+    const current = Boolean(r.current && head !== null);
+    add(r.hash, { label: r.short, kind: r.kind, bold: current, ref: r, current, detached: false });
+  }
   return out;
 }
 
@@ -119,14 +126,34 @@ export function chipText(label) {
   return out + "…";
 }
 
+/** The checked-out branch's chip starts with this (one column). */
+export const CURRENT_MARK = "✓ ";
+/** The line between a chip's parts. */
+const CHIP_DIVIDER = 1;
+
 /**
- * Width of a ref chip (border box) for its shown text. Bold has the same advance in a
- * monospace font, so it doesn't change the width.
- * @param {string} label
- * @param {boolean} [_bold]
+ * What a chip draws, part by part (a label cut to CHIP_COLS; the current branch marked).
+ * @param {Chip|string} c
+ * @returns {ChipPart[]}
  */
-export function chipWidth(label, _bold = false) {
-  return Math.ceil(CHIP_PAD * 2 + textColumns(chipText(label)) * CHIP_CHAR) + CHIP_BORDER * 2;
+export function chipParts(c) {
+  const chip = typeof c === "string" ? { label: c, kind: "head", ref: null } : c;
+  return [{ text: (chip.current ? CURRENT_MARK : "") + chipText(chip.label), ref: chip.ref ?? null, kind: chip.kind }];
+}
+
+/** Width of one part: its text in monospace columns plus padding on both sides. */
+export function partWidth(text) {
+  return Math.ceil(CHIP_PAD * 2 + textColumns(text) * CHIP_CHAR);
+}
+
+/**
+ * Width of a ref chip (border box): its parts, the lines between them and the border. Bold has
+ * the same advance in a monospace font, so it doesn't change the width.
+ * @param {Chip|string} c a chip, or a bare label
+ */
+export function chipWidth(c) {
+  const parts = chipParts(c);
+  return parts.reduce((w, p) => w + partWidth(p.text), 0) + CHIP_DIVIDER * (parts.length - 1) + CHIP_BORDER * 2;
 }
 
 /**
@@ -146,19 +173,33 @@ export function pointerScale(bounds, layoutHeight, zoom) {
 }
 
 /**
- * The chip under x (row-local px), or null. Chips start at `start` and sit CHIP_GAP apart.
- * @template {{label:string, bold?:boolean}} C
+ * The chip and its part under x (row-local layout px), or null. Chips start at `start` and sit
+ * CHIP_GAP apart; inside a chip the parts follow the left border, a divider between them.
+ * @template {Chip} C
  * @param {C[]} chips
  * @param {number} x
  * @param {number} start
- * @returns {C|null}
+ * @returns {{chip: C, part: ChipPart}|null}
  */
-export function chipAt(chips, x, start) {
+export function chipPartAt(chips, x, start) {
   let left = start;
   for (const c of chips) {
-    const right = left + chipWidth(c.label, c.bold);
-    if (x >= left && x < right) return c;
+    const right = left + chipWidth(c);
+    if (x >= left && x < right) {
+      const parts = chipParts(c);
+      let pl = left + CHIP_BORDER;
+      for (let i = 0; i < parts.length; i++) {
+        const pr = pl + partWidth(parts[i].text) + (i < parts.length - 1 ? CHIP_DIVIDER : CHIP_BORDER);
+        if (x < pr || i === parts.length - 1) return { chip: c, part: parts[i] };
+        pl = pr;
+      }
+    }
     left = right + CHIP_GAP;
   }
   return null;
+}
+
+/** The chip under x (row-local layout px), or null. */
+export function chipAt(chips, x, start) {
+  return chipPartAt(chips, x, start)?.chip ?? null;
 }

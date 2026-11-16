@@ -3,7 +3,8 @@ import { div, PathBuilder } from "gpui-kit";
 import { laneX } from "../lib/format.js";
 
 const DOT = 4;
-const laneColor = (t, color) => t["ansi" + (color + 1)];
+/** A lane's color: the theme's ansi palette. */
+export const laneColor = (t, color) => t["ansi" + (color + 1)];
 
 function segment(x0, y0, x1, y1) {
   const p = PathBuilder.stroke(1.5).move_to(x0, y0);

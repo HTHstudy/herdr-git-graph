@@ -3,10 +3,10 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
 import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, spaces, run, notify, openOverlay } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
-import { paintRow } from "./graph-cell.js";
+import { paintRow, laneColor } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
-import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipAt, chipText, pointerScale, CHIP_FONT } from "../lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT } from "../lib/format.js";
 import { menuFor, dropChecks } from "../lib/actions.js";
 import { requestState } from "../lib/run.js";
 import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
@@ -358,9 +358,10 @@ export class Panel {
     if (r.kind === "commit") {
       // local_position is in zoomed px: back to layout px (the chips' widths) first.
       const scale = pointerScale(e.bounds, ROW_HEIGHT, settings().zoom);
+      if (e.bounds) this.scale = scale; // for left presses, which only see the list's box
       const x = e.local_position ? e.local_position.x / scale : -1;
-      const chip = chipAt(this.chips.get(r.hash) ?? [], x, this.graphW);
-      if (chip?.ref) target = refTarget(chip.ref, d.remotes);
+      const hit = chipPartAt(this.chips.get(r.hash) ?? [], x, this.graphW);
+      if (hit?.part.ref) target = refTarget(hit.part.ref, d.remotes);
     }
     const ctx = menuCtx(d, s.branches);
     s.selected = r.hash;
@@ -568,12 +569,29 @@ export class Panel {
     cx.timer.after(120, (cx) => this.checkMore(cx));
   }
 
-  chip(c, t, mono) {
+  /**
+   * One ref chip, drawn part by part at exactly chipWidth / partWidth (the hit tests use the
+   * same numbers): monospace at CHIP_FONT. The checked-out branch is filled with its lane color,
+   * a detached HEAD with the accent; a paired remote part shows just the remote name, tinted.
+   */
+  chip(c, t, mono, lane) {
     const color = c.kind === "head" ? t.accent : c.kind === "tag" ? t.ansi3 : t.muted;
-    // Monospace at CHIP_FONT: chipWidth is exact for it (and the right-click hit test uses it).
-    return div().flex_none().w(chipWidth(c.label, c.bold)).h(18).px(5).flex().items_center().rounded(4).border_1().border_color(color)
-      .font_family(mono).text_size(CHIP_FONT).text_color(color).when(c.kind === "head", (e) => e.bg(t.accent + "22")).when(c.bold, (e) => e.font_bold())
-      .child(div().whitespace_nowrap().overflow_hidden().child(chipText(c.label)));
+    const fill = c.current ? lane : c.detached ? t.accent : null, edge = fill ?? color;
+    const parts = chipParts(c), out = [];
+    parts.forEach((p, i) => {
+      if (i > 0) out.push(div().w(1).h_full().flex_none().bg(edge));
+      let e = div().w(partWidth(p.text)).h_full().flex_none().px(5).flex().items_center().whitespace_nowrap().overflow_hidden();
+      if (i === 0) {
+        e = fill ? e.bg(fill).text_color(t.background).font_semibold()
+          : e.text_color(color).when(c.kind === "head", (x) => x.bg(t.accent + "22"));
+      } else {
+        const tint = fill ?? t.muted;
+        e = e.bg(tint + "1a").text_color(tint);
+      }
+      out.push(e.child(p.text));
+    });
+    return h_flex().flex_none().w(chipWidth(c)).h(18).items_center().rounded(4).border_1().border_color(edge).overflow_hidden()
+      .font_family(mono).text_size(CHIP_FONT).children(out);
   }
 
   row(r, t, cols, now, mono, s) {
@@ -591,13 +609,16 @@ export class Panel {
     }
     const selected = s.selected === r.hash, open = s.expanded === r.hash;
     const current = this.findCur === r.hash, match = !current && Boolean(this.findCache?.set.has(r.hash));
-    const bg = selected || current ? t.selected : match ? t.selection : open ? t.surface : null;
+    const lane = laneColor(t, r.color);
+    // HEAD's row: a faint tint of its lane color (selection, Find and hover still win).
+    const headTint = r.kind === "commit" && r.hash === d.headHash ? lane + "14" : null;
+    const bg = selected || current ? t.selected : match ? t.selection : open ? t.surface : headTint;
     return h_flex().w_full().h(ROW_HEIGHT).flex_none().items_center().pr(10)
       .when(Boolean(bg), (e) => e.bg(bg))
       .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
-        .children(chips.map((c) => this.chip(c, t, mono)))
+        .children(chips.map((c) => this.chip(c, t, mono, lane)))
         .child(div().flex_1().min_w(0).truncate().text_color(current ? t.accent : dim ? t.dim : t.foreground).child(subject || " ")))
       .when(cols.author, (e) => e.child(div().w(110).flex_none().pl(10).truncate().text_color(t.muted).child(author)))
       .when(cols.date, (e) => e.child(div().w(76).flex_none().pl(10).truncate().text_color(t.muted).child(date ? relativeDate(date, now) : "")))
