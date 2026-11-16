@@ -4,9 +4,10 @@ import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, Inp
 import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, spaces, run, notify, openOverlay } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow, laneColor } from "./graph-cell.js";
+import { inkOn } from "../lib/color.js";
 import { detailElement } from "./details.js";
 import { headerElement, branchesDropdown, fetchAll, busyOf } from "./header.js";
-import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT, CHIP_ICON, CHIP_ICON_SLOT } from "../lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT, CHIP_FAMILY, CHIP_ICON, CHIP_ICON_SLOT } from "../lib/format.js";
 import { menuFor, dropChecks, planFor, dialogFor } from "../lib/actions.js";
 import { openDialog } from "./menu.js";
 import { requestState, actionLabel } from "../lib/run.js";
@@ -618,11 +619,12 @@ export class Panel {
 
   /**
    * One ref chip, drawn part by part at exactly chipWidth / partWidth (the hit tests use the
-   * same numbers): monospace at CHIP_FONT. The checked-out branch is filled with its lane color,
-   * a detached HEAD with the accent; a paired remote part shows just the remote name, tinted.
+   * same numbers): CHIP_FAMILY at CHIP_FONT. The checked-out branch is filled with its lane color,
+   * a detached HEAD with the accent, its text whichever of background / foreground reads better
+   * on that fill; a paired remote part shows just the remote name, tinted.
    * Each chip starts with its kind's icon (branch / check / cloud / tag / commit).
    */
-  chip(c, t, mono, lane) {
+  chip(c, t, lane) {
     const color = c.kind === "head" ? t.accent : c.kind === "tag" ? t.ansi3 : t.muted;
     const fill = c.current ? lane : c.detached ? t.accent : null, edge = fill ?? color;
     const parts = chipParts(c), out = [];
@@ -631,7 +633,7 @@ export class Panel {
       let e = h_flex().w(partWidth(p)).h_full().flex_none().px(5).items_center().whitespace_nowrap().overflow_hidden();
       let ink;
       if (i === 0) {
-        ink = fill ? t.background : color;
+        ink = fill ? inkOn(fill, t.background, t.foreground) : color;
         e = fill ? e.bg(fill).font_semibold() : e.when(c.kind === "head", (x) => x.bg(t.accent + "22"));
       } else {
         ink = fill ?? t.muted;
@@ -642,7 +644,7 @@ export class Panel {
       out.push(e.text_color(ink).child(p.text));
     });
     return h_flex().flex_none().w(chipWidth(c)).h(18).items_center().rounded(4).border_1().border_color(edge).overflow_hidden()
-      .font_family(mono).text_size(CHIP_FONT).children(out);
+      .font_family(CHIP_FAMILY).text_size(CHIP_FONT).children(out);
   }
 
   row(r, t, cols, now, mono, s) {
@@ -669,7 +671,7 @@ export class Panel {
       .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
       .child(h_flex().flex_1().min_w(0).gap(4).items_center()
-        .children(chips.map((c) => this.chip(c, t, mono, lane)))
+        .children(chips.map((c) => this.chip(c, t, lane)))
         .child(div().flex_1().min_w(0).truncate().text_color(current ? t.accent : dim ? t.dim : t.foreground).child(subject || " ")))
       .when(cols.author, (e) => e.child(div().w(110).flex_none().pl(10).truncate().text_color(t.muted).child(author)))
       .when(cols.date, (e) => e.child(div().w(76).flex_none().pl(10).truncate().text_color(t.muted).child(date ? relativeDate(date, now) : "")))

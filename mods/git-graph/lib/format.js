@@ -117,6 +117,9 @@ export function refChips(refs, head, headHash, remotes = []) {
  */
 export const CHIP_GAP = 4;
 export const CHIP_FONT = 11;
+/** Chip labels are drawn in this font, whatever the person's settings: the 0.6em advance above
+ *  is JetBrains Mono's (it ships with Herdr). */
+export const CHIP_FAMILY = "JetBrains Mono";
 const CHIP_CHAR = 6.6; // 0.6em at 11px
 const CHIP_PAD = 5; // each side
 const CHIP_BORDER = 1; // each side
