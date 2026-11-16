@@ -1,14 +1,24 @@
 // Inline details under an expanded row: one element per detail item (see lib/details.js).
 // Drawn inside the list's renderer, so no handlers here: clicks arrive through the list's on_item_click.
+// The meta values and the message body are selectable TextViews (drag, then cmd-c); the full hash
+// stays plain text so its click-to-copy keeps working. Each TextView sits in a box of the item's
+// fixed height with a fixed line height and no wrapping, so the list's computed sizes still hold
+// (a line too long for the width is clipped, not wrapped).
 import { div } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
-import { fileCounts, absoluteDate, TEXT, PAD } from "../lib/details.js";
+import { h_flex, v_flex, TextView } from "gpui-base";
+import { fileCounts, absoluteDate, linesHtml, TEXT, PAD } from "../lib/details.js";
 import { paintThrough } from "./graph-cell.js";
 
 const KIND = { A: "ansi2", M: "ansi3", D: "ansi1", R: "ansi4", U: "ansi2" };
 
 /** Color of a change letter; conflicts use `blocked`. */
 const kindColor = (t, status, conflict) => (conflict ? t.blocked : t[KIND[status] ?? "muted"]);
+
+/** A selectable one- or multi-line text of `lines` lines, `TEXT` high each. */
+function selectable(id, html, lines) {
+  return div().flex_1().min_w(0).h(lines * TEXT).overflow_hidden().whitespace_nowrap().line_height(`${TEXT}px`)
+    .child(TextView.html(id, html).selectable(true));
+}
 
 /**
  * @param {import("../lib/details.js").DetailItem} item
@@ -44,15 +54,15 @@ function content(item, o) {
     case "meta": {
       const i = item.info;
       const line = (name, value) => h_flex().h(TEXT).items_center().gap(6).child(label(name))
-        .child(div().flex_1().min_w(0).truncate().text_size(12).child(value));
+        .child(selectable(`${item.key}:${name}`, linesHtml([value]), 1).text_size(12));
       return box.items_start().child(v_flex().w_full().min_w(0)
         .child(line("Author", `${i.author} <${i.email}>`))
         .child(line("Committer", `${i.committer} <${i.committerEmail}>`))
         .child(line("Date", absoluteDate(i.date))));
     }
     case "body":
-      return box.items_start().py(PAD).child(v_flex().w_full().min_w(0).pl(84).font_family(mono).text_size(12)
-        .children(item.lines.map((l) => div().h(TEXT).truncate().child(l || " "))));
+      return box.items_start().py(PAD).child(h_flex().w_full().min_w(0).pl(84).font_family(mono).text_size(12)
+        .child(selectable(item.key, linesHtml(item.lines), item.lines.length)));
     case "group":
       return box.child(div().text_size(12).font_semibold().text_color(t.muted).child(item.title));
     case "file":

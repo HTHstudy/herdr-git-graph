@@ -425,7 +425,9 @@ export class Panel {
     const d = this.data;
     if (!d) return;
     const items = this.items(), item = items[this.indexOf(key)];
-    if (!item) return;
+    // The message body and author/date lines are selectable text: a click or a drag there does
+    // nothing, and must not take focus from the text (cmd-c copies the selection).
+    if (!item || item.part === "meta" || item.part === "body") return;
     const s = this.repo(d.key);
     this.handle.focus();
     if (item.part === "row") this.toggle(key);

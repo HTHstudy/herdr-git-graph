@@ -60,6 +60,21 @@ export function bodyLines(body) {
   return lines;
 }
 
+/** Text safe inside HTML: & < > " escaped. */
+export function escapeHtml(text) {
+  return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * Display lines as one HTML fragment for a selectable TextView: each line escaped, its spaces
+ * kept (&nbsp;, so indentation survives and nothing wraps at a space), lines joined by <br>,
+ * an empty line kept as one &nbsp; so it still takes its height.
+ * @param {string[]} lines
+ */
+export function linesHtml(lines) {
+  return `<span>${lines.map((l) => escapeHtml(l).replace(/ /g, "&nbsp;") || "&nbsp;").join("<br>")}</span>`;
+}
+
 /**
  * Diff target of one file of a commit or stash (`parent`: first parent / stash base, null for a root commit).
  * @returns {DiffTarget}

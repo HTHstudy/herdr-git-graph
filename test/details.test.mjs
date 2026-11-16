@@ -5,7 +5,7 @@ import { commitFilesArgs, commitStatusArgs, statusArgs, READ } from "../mods/git
 import { parseNumstat, parseNameStatus, parseStatus } from "../mods/git-graph/lib/parse.js";
 import {
   commitFiles, fileCounts, absoluteDate, bodyLines, commitTarget, uncommittedTarget,
-  uncommittedGroups, detailItems, throughLanes, pruneState, LINE, TEXT, PAD, MAX_BODY,
+  uncommittedGroups, detailItems, throughLanes, pruneState, escapeHtml, linesHtml, LINE, TEXT, PAD, MAX_BODY,
 } from "../mods/git-graph/lib/details.js";
 
 const byMsg = (dir, msg) => git(dir, "log", "--all", "--format=%H", `--grep=^${msg}$`, "-n1");
@@ -126,4 +126,12 @@ test("pruneState drops hashes no longer shown", () => {
   const t = { expanded: "a", selected: "gone" };
   pruneState(t, rows);
   assert.deepEqual(t, { expanded: "a", selected: null });
+});
+
+test("escapeHtml / linesHtml", () => {
+  assert.equal(escapeHtml(`a & <b> "c" 'd'`), "a &amp; &lt;b&gt; &quot;c&quot; 'd'");
+  assert.equal(escapeHtml("&amp;"), "&amp;amp;");
+  assert.equal(escapeHtml(null), "");
+  assert.equal(linesHtml(["x <y>", "", "  two  spaces"]), "<span>x&nbsp;&lt;y&gt;<br>&nbsp;<br>&nbsp;&nbsp;two&nbsp;&nbsp;spaces</span>");
+  assert.equal(linesHtml(["a@b.c"]), "<span>a@b.c</span>");
 });
