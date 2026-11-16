@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { graphWidth, visibleColumns, relativeDate, refChips, laneX, chipWidth, chipAt, chipPartAt, chipParts, partWidth, chipText, textColumns, pointerScale, CHIP_GAP, CHIP_COLS, CURRENT_MARK } from "../mods/git-graph/lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, laneX, chipWidth, chipAt, chipPartAt, chipParts, partWidth, chipText, textColumns, pointerScale, CHIP_GAP, CHIP_COLS, CHIP_ICON_SLOT } from "../mods/git-graph/lib/format.js";
 
 test("graphWidth counts lanes from rows and lines, capped at 12", () => {
   assert.equal(graphWidth([]), 24);
@@ -105,23 +105,25 @@ test("pointerScale: item height over layout height, else zoom, else 1", () => {
   assert.equal(pointerScale(null, 26, "x"), 1);
 });
 
-test("current branch: ✓ mark first, one column, width exact; it leads the row's chips", () => {
+test("chip icons: check for the checked-out branch, branch, cloud, tag, commit; icon slot counted", () => {
   const refs = [
     { hash: "a", kind: "tag", short: "v1", current: false },
     { hash: "a", kind: "head", short: "topic", current: false },
     { hash: "a", kind: "head", short: "main", current: true },
+    { hash: "a", kind: "remote", short: "origin/x", current: false },
   ];
-  const [cur, other] = refChips(refs, "main", "a").get("a");
-  assert.equal(cur.label, "main");
-  assert.ok(cur.current && !other.current);
-  assert.equal(textColumns(CURRENT_MARK), 2);
-  assert.equal(chipParts(cur)[0].text, "✓ main");
-  assert.equal(chipWidth(cur), Math.ceil(10 + 6 * 6.6) + 2);
-  assert.equal(chipWidth(other), chipWidth("topic"));
-  // Detached: the HEAD chip, not marked current.
+  const chips = refChips(refs, "main", "a", ["origin"]).get("a");
+  assert.deepEqual(chips.map((c) => [c.label, chipParts(c)[0].icon]), [["main", "check"], ["topic", "branch"], ["origin/x", "cloud"], ["v1", "tag"]]);
+  const [cur] = chips;
+  assert.ok(cur.current);
+  assert.equal(chipParts(cur)[0].text, "main", "no text mark: the icon says it");
+  assert.equal(CHIP_ICON_SLOT, 13);
+  assert.equal(chipWidth(cur), Math.ceil(10 + 13 + 4 * 6.6) + 2);
+  assert.equal(chipWidth("main"), Math.ceil(10 + 4 * 6.6) + 2, "a bare label (a stash chip) has no icon");
+  // Detached: the HEAD chip with the commit icon.
   const det = refChips(refs.map((r) => ({ ...r, current: false })), null, "a").get("a")[0];
   assert.ok(det.detached && !det.current);
-  assert.equal(chipParts(det)[0].text, "HEAD");
+  assert.deepEqual([chipParts(det)[0].text, chipParts(det)[0].icon], ["HEAD", "commit"]);
 });
 
 test("chipPartAt: one-part chips name their ref", () => {
@@ -154,7 +156,8 @@ test("paired chip: parts, exact width, part hit-testing", () => {
   const chips = refChips(refs, "dev", "z", ["origin"]).get("a");
   const [pair, tag] = chips;
   assert.deepEqual(chipParts(pair).map((p) => [p.text, p.kind, p.ref]), [["main", "head", refs[0]], ["origin", "remote", refs[1]]]);
-  const wl = partWidth("main"), wr = partWidth("origin");
+  const wl = partWidth({ text: "main", icon: "branch" }), wr = partWidth("origin");
+  assert.equal(chipParts(pair)[1].icon, null, "the paired remote part has no icon");
   assert.equal(chipWidth(pair), 1 + wl + 1 + wr + 1);
   const start = 30;
   assert.equal(chipPartAt(chips, start, start).part.ref, refs[0], "left border: local part");

@@ -1,12 +1,12 @@
 // The Graph panel: loads the focused repository and draws its commit graph.
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, VirtualListScrollHandle, InputState } from "gpui-base";
 import { watchFolder, theme, settings, shared, setShared, nextCommand, focused, panes, spaces, run, notify, openOverlay } from "herdr";
 import { location, loadRepo, git } from "./repo.js";
 import { paintRow, laneColor } from "./graph-cell.js";
 import { detailElement } from "./details.js";
 import { headerElement, fetchAll, busyOf } from "./header.js";
-import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT } from "../lib/format.js";
+import { graphWidth, visibleColumns, relativeDate, refChips, chipWidth, chipPartAt, chipParts, partWidth, pointerScale, CHIP_FONT, CHIP_ICON, CHIP_ICON_SLOT } from "../lib/format.js";
 import { menuFor, dropChecks } from "../lib/actions.js";
 import { requestState } from "../lib/run.js";
 import { rowTarget, refTarget, menuCtx, menuHeight } from "../lib/targets.js";
@@ -19,6 +19,7 @@ import { paneKey, diffKey, tabKey } from "./diff-pane.js";
 import { toggleBranch, removeBranch, pruneFilter, findMatches, stepMatch } from "../lib/filter.js";
 
 export const ROW_HEIGHT = 26;
+const ICONS = "mods/git-graph/icons/";
 const PAGE = 300;
 /** Loaded commit details kept for instant re-expanding. */
 const DETAIL_CACHE = 50;
@@ -573,6 +574,7 @@ export class Panel {
    * One ref chip, drawn part by part at exactly chipWidth / partWidth (the hit tests use the
    * same numbers): monospace at CHIP_FONT. The checked-out branch is filled with its lane color,
    * a detached HEAD with the accent; a paired remote part shows just the remote name, tinted.
+   * Each chip starts with its kind's icon (branch / check / cloud / tag / commit).
    */
   chip(c, t, mono, lane) {
     const color = c.kind === "head" ? t.accent : c.kind === "tag" ? t.ansi3 : t.muted;
@@ -580,15 +582,18 @@ export class Panel {
     const parts = chipParts(c), out = [];
     parts.forEach((p, i) => {
       if (i > 0) out.push(div().w(1).h_full().flex_none().bg(edge));
-      let e = div().w(partWidth(p.text)).h_full().flex_none().px(5).flex().items_center().whitespace_nowrap().overflow_hidden();
+      let e = h_flex().w(partWidth(p)).h_full().flex_none().px(5).items_center().whitespace_nowrap().overflow_hidden();
+      let ink;
       if (i === 0) {
-        e = fill ? e.bg(fill).text_color(t.background).font_semibold()
-          : e.text_color(color).when(c.kind === "head", (x) => x.bg(t.accent + "22"));
+        ink = fill ? t.background : color;
+        e = fill ? e.bg(fill).font_semibold() : e.when(c.kind === "head", (x) => x.bg(t.accent + "22"));
       } else {
-        const tint = fill ?? t.muted;
-        e = e.bg(tint + "1a").text_color(tint);
+        ink = fill ?? t.muted;
+        e = e.bg(ink + "1a");
       }
-      out.push(e.child(p.text));
+      // The icon slot is CHIP_ICON_SLOT wide: the icon and a gap, as partWidth counts it.
+      if (p.icon) e = e.child(svg(ICONS + p.icon + ".svg").size(CHIP_ICON).flex_none().mr(CHIP_ICON_SLOT - CHIP_ICON).text_color(ink));
+      out.push(e.text_color(ink).child(p.text));
     });
     return h_flex().flex_none().w(chipWidth(c)).h(18).items_center().rounded(4).border_1().border_color(edge).overflow_hidden()
       .font_family(mono).text_size(CHIP_FONT).children(out);

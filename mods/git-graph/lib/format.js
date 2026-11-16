@@ -54,14 +54,14 @@ export function relativeDate(unix, now) {
 }
 
 /**
- * A ref chip. `current`: the checked-out branch (drawn filled with its lane color, "✓" first);
+ * A ref chip. `current`: the checked-out branch (drawn filled with its lane color, a check icon first);
  * `detached`: the "HEAD" chip of a detached HEAD (filled with the accent).
  * `remotes`: same-named remote branches on the same commit, paired into this local chip
  * (`main | origin`): each draws as a part with just its remote name.
  * @typedef {{label:string, kind:"head"|"remote"|"tag", bold:boolean, ref:object|null, current?:boolean, detached?:boolean,
  *   remotes?: {remote:string, ref:object}[]}} Chip
  * One drawn part of a chip: its text and the ref it names (null: detached HEAD).
- * @typedef {{text:string, ref:object|null, kind:string}} ChipPart
+ * @typedef {{text:string, ref:object|null, kind:string, icon:string|null}} ChipPart
  */
 
 const ORDER = { head: 0, remote: 1, tag: 2 };
@@ -147,27 +147,41 @@ export function chipText(label) {
   return out + "…";
 }
 
-/** The checked-out branch's chip starts with this (one column). */
-export const CURRENT_MARK = "✓ ";
+/** An icon before a part's text: 10px and a 3px gap. */
+export const CHIP_ICON = 10;
+export const CHIP_ICON_SLOT = 13;
 /** The line between a chip's parts. */
 const CHIP_DIVIDER = 1;
 
+/** The icon (icons/<name>.svg) a chip's first part starts with, or null (a stash). */
+function chipIcon(chip) {
+  if (chip.detached) return "commit";
+  if (chip.current) return "check";
+  return chip.kind === "head" ? "branch" : chip.kind === "tag" ? "tag" : chip.kind === "remote" ? "cloud" : null;
+}
+
 /**
- * What a chip draws, part by part (a label cut to CHIP_COLS; the current branch marked).
+ * What a chip draws, part by part: an icon (branch, check for the checked-out branch, cloud,
+ * tag, commit for a detached HEAD) and a label cut to CHIP_COLS; a paired remote part is just
+ * the remote name, no icon.
  * @param {Chip|string} c
  * @returns {ChipPart[]}
  */
 export function chipParts(c) {
-  const chip = typeof c === "string" ? { label: c, kind: "head", ref: null } : c;
+  const chip = typeof c === "string" ? { label: c, kind: "stash", ref: null } : c;
   return [
-    { text: (chip.current ? CURRENT_MARK : "") + chipText(chip.label), ref: chip.ref ?? null, kind: chip.kind },
-    ...(chip.remotes ?? []).map((p) => ({ text: chipText(p.remote), ref: p.ref, kind: "remote" })),
+    { text: chipText(chip.label), ref: chip.ref ?? null, kind: chip.kind, icon: chipIcon(chip) },
+    ...(chip.remotes ?? []).map((p) => ({ text: chipText(p.remote), ref: p.ref, kind: "remote", icon: null })),
   ];
 }
 
-/** Width of one part: its text in monospace columns plus padding on both sides. */
-export function partWidth(text) {
-  return Math.ceil(CHIP_PAD * 2 + textColumns(text) * CHIP_CHAR);
+/**
+ * Width of one part: padding on both sides, its icon slot, its text in monospace columns.
+ * @param {{text:string, icon?:string|null}|string} p a part, or bare text (no icon)
+ */
+export function partWidth(p) {
+  const part = typeof p === "string" ? { text: p, icon: null } : p;
+  return Math.ceil(CHIP_PAD * 2 + (part.icon ? CHIP_ICON_SLOT : 0) + textColumns(part.text) * CHIP_CHAR);
 }
 
 /**
@@ -177,7 +191,7 @@ export function partWidth(text) {
  */
 export function chipWidth(c) {
   const parts = chipParts(c);
-  return parts.reduce((w, p) => w + partWidth(p.text), 0) + CHIP_DIVIDER * (parts.length - 1) + CHIP_BORDER * 2;
+  return parts.reduce((w, p) => w + partWidth(p), 0) + CHIP_DIVIDER * (parts.length - 1) + CHIP_BORDER * 2;
 }
 
 /**
@@ -213,7 +227,7 @@ export function chipPartAt(chips, x, start) {
       const parts = chipParts(c);
       let pl = left + CHIP_BORDER;
       for (let i = 0; i < parts.length; i++) {
-        const pr = pl + partWidth(parts[i].text) + (i < parts.length - 1 ? CHIP_DIVIDER : CHIP_BORDER);
+        const pr = pl + partWidth(parts[i]) + (i < parts.length - 1 ? CHIP_DIVIDER : CHIP_BORDER);
         if (x < pr || i === parts.length - 1) return { chip: c, part: parts[i] };
         pl = pr;
       }
