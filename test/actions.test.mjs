@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixture, git, ISOLATED_ENV } from "./helpers.mjs";
-import { menuFor, dialogFor, planFor, messageArgs, copiedText } from "../mods/git-graph/lib/actions.js";
+import { menuFor, dialogFor, planFor, messageArgs, copiedText, copiedSubject } from "../mods/git-graph/lib/actions.js";
 
 const ctx = { head: "main", headHash: "d".repeat(40), remotes: ["origin"], filtered: [], on: null };
 const H = "a".repeat(40), P1 = "b".repeat(40), P2 = "c".repeat(40);
@@ -123,6 +123,9 @@ test("copy message: read argv, label and trimmed output", () => {
   assert.equal(menuFor(stash, ctx).find((i) => i.id === "copyStashMessage").label, "Copy Stash Message to Clipboard");
   assert.equal(copiedText("subj\n\nbody 1\n  body 2\n\n"), "subj\n\nbody 1\n  body 2");
   assert.equal(copiedText(""), "");
+  assert.equal(copiedSubject("subj\n\nbody 1\n  body 2"), "subj");
+  assert.equal(copiedSubject("only"), "only");
+  assert.equal(copiedSubject(""), "");
 });
 
 test("danger dialogs", () => {

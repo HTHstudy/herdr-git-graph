@@ -9,7 +9,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay, openOverlay, theme, run, notify, setShared } from "herdr";
-import { menuFor, dialogFor, planFor, copiedText } from "../lib/actions.js";
+import { menuFor, dialogFor, planFor, copiedText, copiedSubject } from "../lib/actions.js";
 import { git } from "./repo.js";
 import { actionLabel } from "../lib/run.js";
 import { dialogHeight, targetTitle } from "../lib/targets.js";
@@ -94,7 +94,7 @@ export class Menu {
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `git exited ${r.code}`);
         const text = copiedText(r.stdout);
         cx.write_to_clipboard(text);
-        notify({ title: "Copied", body: text, level: "info", timeout: 2000 });
+        notify({ title: "Copied", body: copiedSubject(text), level: "info", timeout: 2000 });
       } catch (e) {
         notify({ title: "Copy failed", body: String(e?.message ?? e), level: "error" });
       } finally {

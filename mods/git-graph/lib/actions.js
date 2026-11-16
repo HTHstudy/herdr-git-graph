@@ -50,6 +50,11 @@ export function copiedText(stdout) {
   return String(stdout ?? "").replace(/\n+$/, "");
 }
 
+/** The toast's body for a copied message: its subject (first line). */
+export function copiedSubject(text) {
+  return String(text ?? "").split("\n", 1)[0];
+}
+
 /** @returns {(MenuItem|"sep")[]} */
 export function menuFor(target, ctx) {
   const hasRemotes = ctx.remotes.length > 0;
