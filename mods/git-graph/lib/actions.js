@@ -11,7 +11,9 @@
 //          on: the space's machine (null = local); Create Archive is local only (folder picker).
 //          dropable: the right-clicked commit is reachable from HEAD with no merge commit
 //          between it and HEAD (checked at right-click; see dropChecks). Drop needs it true.
-// Plan   = {steps: string[][], guards?: Guard[]} | {copy} | {ui, arg?}
+// Plan   = {steps: string[][], guards?: Guard[]} | {copy} | {copyFrom} | {ui, arg?}
+//          copyFrom: a read-only git argv (no "git") whose output, trailing newlines trimmed,
+//          is what to copy (the full commit message is not in the Target).
 // Guard  = {argv: string[], expect: "ok"|"empty"|{equals: string}, message: string}: git argv
 //          (no "git") run before any step; one that fails aborts the plan with `message`
 //          ("{out}" in it is replaced by the guard's trimmed output).
@@ -38,6 +40,16 @@ function tidy(items) {
   return out;
 }
 
+/** Read-only argv printing a commit's (or stash commit's) full message: subject, blank line, body. */
+export function messageArgs(hash) {
+  return [...READ, "log", "-1", "--format=%B", hash, "--"];
+}
+
+/** What a `copyFrom` read printed, as the text to copy (git adds trailing newlines). */
+export function copiedText(stdout) {
+  return String(stdout ?? "").replace(/\n+$/, "");
+}
+
 /** @returns {(MenuItem|"sep")[]} */
 export function menuFor(target, ctx) {
   const hasRemotes = ctx.remotes.length > 0;
@@ -57,6 +69,7 @@ export function menuFor(target, ctx) {
         attached && M("reset", "Reset current branch to this Commit…"), SEP,
         M("copyHash", "Copy Commit Hash to Clipboard"),
         M("copySubject", "Copy Commit Subject to Clipboard"),
+        M("copyMessage", "Copy Commit Message to Clipboard"),
       ]);
     }
     case "branch": {
@@ -98,6 +111,7 @@ export function menuFor(target, ctx) {
         M("stashPop", "Pop Stash…"), M("stashDrop", "Drop Stash…"), SEP,
         M("copyStashName", "Copy Stash Name to Clipboard"),
         M("copyStashHash", "Copy Stash Hash to Clipboard"),
+        M("copyStashMessage", "Copy Stash Message to Clipboard"),
       ]);
     default:
       return [];
@@ -391,6 +405,8 @@ export function planFor(id, t, v, ctx) {
     case "copyTagName":
     case "copyStashName": return { copy: id === "copyStashName" ? t.selector : t.name };
     case "copyStashHash": return { copy: t.hash };
+    case "copyMessage":
+    case "copyStashMessage": return { copyFrom: messageArgs(t.hash) };
     case "unselect": return { ui: "unselect", arg: t.name };
     case "openChanges": return { ui: "openChanges" };
     case "tagDetails": return { ui: "tagDetails", arg: t.name };

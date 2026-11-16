@@ -2,17 +2,21 @@
 // closes. Opened by the Graph panel with props().menu = {owner, root, on, target, ctx}; the
 // Target was captured at the right-click and is never re-read from live data.
 //
-// Choosing an item: copy → clipboard + toast; openChanges → shows the Changes side panel;
+// Choosing an item: copy → clipboard + toast; copyFrom → git read, then clipboard + toast (the
+// menu stays open until the read ends); openChanges → shows the Changes side panel;
 // tagDetails → the details dialog; an item with a dialog → the dialog; anything else → its
 // plan goes to the panel that opened the menu (`request`), which runs it.
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { props, closeOverlay, openOverlay, theme, run, notify, setShared } from "herdr";
-import { menuFor, dialogFor, planFor } from "../lib/actions.js";
+import { menuFor, dialogFor, planFor, copiedText } from "../lib/actions.js";
+import { git } from "./repo.js";
 import { actionLabel } from "../lib/run.js";
 import { dialogHeight, targetTitle } from "../lib/targets.js";
 
 export const DIALOG_WIDTH = 440;
+/** A message read is quick; don't hold the menu open long if git hangs. */
+const COPY_TIMEOUT = 10000;
 
 /**
  * Hand work to the Graph panel copy `owner` (overlays can't run long tasks: theirs stop
@@ -57,11 +61,14 @@ export class Menu {
   }
 
   choose(it, cx) {
+    if (this.copying) return; // a copy read is in flight: the menu closes when it ends
     const m = this.m(), label = actionLabel(it.label);
-    closeOverlay(props()?.overlay);
     const dialog = dialogFor(it.id, m.target, m.ctx);
+    const plan = dialog ? null : planFor(it.id, m.target, {}, m.ctx);
+    // The text is read first (the menu's tasks stop once it closes), then the menu closes.
+    if (plan && "copyFrom" in plan) { this.copyFrom(m, plan.copyFrom, cx); return; }
+    closeOverlay(props()?.overlay);
     if (dialog) { openDialog(m, it.id, label, dialog); return; }
-    const plan = planFor(it.id, m.target, {}, m.ctx);
     if ("copy" in plan) {
       cx.write_to_clipboard(plan.copy);
       notify({ title: "Copied", body: plan.copy, level: "info", timeout: 2000 });
@@ -75,6 +82,26 @@ export class Menu {
         openOverlay({ mod: "git-graph", kind: "dialog", width: DIALOG_WIDTH, height: 320, props: { dialog: { ...m, id: "tagDetails", label, tag: plan.arg } } });
       }
     } else request(m, { run: { label, plan } });
+  }
+
+  /** Copy what a read-only git argv prints (the full commit / stash message), then close. */
+  copyFrom(m, argv, cx) {
+    this.copying = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await git(m.root, m.on, argv, { timeout: COPY_TIMEOUT });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `git exited ${r.code}`);
+        const text = copiedText(r.stdout);
+        cx.write_to_clipboard(text);
+        notify({ title: "Copied", body: text, level: "info", timeout: 2000 });
+      } catch (e) {
+        notify({ title: "Copy failed", body: String(e?.message ?? e), level: "error" });
+      } finally {
+        this.copying = false;
+        closeOverlay(props()?.overlay);
+      }
+    });
   }
 
   key(e, cx) {

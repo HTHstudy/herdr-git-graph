@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fixture, git } from "./helpers.mjs";
-import { menuFor, dialogFor, planFor } from "../mods/git-graph/lib/actions.js";
+import { fixture, git, ISOLATED_ENV } from "./helpers.mjs";
+import { menuFor, dialogFor, planFor, messageArgs, copiedText } from "../mods/git-graph/lib/actions.js";
 
 const ctx = { head: "main", headHash: "d".repeat(40), remotes: ["origin"], filtered: [], on: null };
 const H = "a".repeat(40), P1 = "b".repeat(40), P2 = "c".repeat(40);
@@ -21,11 +21,11 @@ const ids = (m) => m.map((i) => (i === "sep" ? "sep" : i.id));
 
 test("menuFor commit", () => {
   assert.deepEqual(ids(menuFor(commit, { ...ctx, dropable: true })), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "drop", "sep",
-    "merge", "rebase", "reset", "sep", "copyHash", "copySubject"]);
+    "merge", "rebase", "reset", "sep", "copyHash", "copySubject", "copyMessage"]);
   assert.ok(!ids(menuFor(commit, ctx)).includes("drop"), "Drop needs the right-click check (ctx.dropable)");
   assert.ok(!ids(menuFor(commit, { ...ctx, dropable: false })).includes("drop"));
   assert.equal(menuFor(commit, ctx)[0].label, "Add Tag…");
-  assert.deepEqual(ids(menuFor(commit, { ...ctx, head: null })), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "sep", "copyHash", "copySubject"]);
+  assert.deepEqual(ids(menuFor(commit, { ...ctx, head: null })), ["addTag", "createBranch", "sep", "checkout", "cherryPick", "revert", "sep", "copyHash", "copySubject", "copyMessage"]);
   assert.ok(!ids(menuFor(mergeC, { ...ctx, dropable: true })).includes("drop"));
   assert.ok(!ids(menuFor(rootC, { ...ctx, dropable: true })).includes("drop"));
 });
@@ -40,7 +40,7 @@ test("menuFor branch / remote / tag / uncommitted / stash", () => {
   assert.deepEqual(ids(menuFor(tag, ctx)), ["tagDetails", "deleteTag", "pushTag", "sep", "archive", "sep", "copyTagName"]);
   assert.deepEqual(ids(menuFor({ ...tag, annotated: false }, { ...ctx, remotes: [] })), ["deleteTag", "sep", "archive", "sep", "copyTagName"]);
   assert.deepEqual(ids(menuFor(unc, ctx)), ["stashPush", "resetUncommitted", "clean", "sep", "openChanges"]);
-  assert.deepEqual(ids(menuFor(stash, ctx)), ["stashApply", "stashBranch", "stashPop", "stashDrop", "sep", "copyStashName", "copyStashHash"]);
+  assert.deepEqual(ids(menuFor(stash, ctx)), ["stashApply", "stashBranch", "stashPop", "stashDrop", "sep", "copyStashName", "copyStashHash", "copyStashMessage"]);
   assert.equal(menuFor(unc, ctx)[4].label, "Open Changes panel");
 });
 
@@ -110,8 +110,19 @@ test("dialogFor defaults", () => {
 });
 
 test("null dialogs", () => {
-  for (const id of ["checkoutBranch", "copyHash", "copySubject", "copyName", "copyTagName", "copyStashName", "copyStashHash", "unselect", "openChanges", "tagDetails"])
+  for (const id of ["checkoutBranch", "copyHash", "copySubject", "copyName", "copyTagName", "copyStashName", "copyStashHash", "copyMessage", "copyStashMessage", "unselect", "openChanges", "tagDetails"])
     assert.equal(dialogFor(id, commit, ctx), null, id);
+});
+
+test("copy message: read argv, label and trimmed output", () => {
+  assert.deepEqual(planFor("copyMessage", commit, {}, ctx), { copyFrom: messageArgs(H) });
+  assert.deepEqual(planFor("copyStashMessage", stash, {}, ctx), { copyFrom: messageArgs(H) });
+  assert.deepEqual(messageArgs(H).slice(0, 3), ["--no-optional-locks", "-c", "core.fsmonitor=false"]);
+  assert.deepEqual(messageArgs(H).slice(3), ["log", "-1", "--format=%B", H, "--"]);
+  assert.equal(menuFor(commit, ctx).find((i) => i.id === "copyMessage").label, "Copy Commit Message to Clipboard");
+  assert.equal(menuFor(stash, ctx).find((i) => i.id === "copyStashMessage").label, "Copy Stash Message to Clipboard");
+  assert.equal(copiedText("subj\n\nbody 1\n  body 2\n\n"), "subj\n\nbody 1\n  body 2");
+  assert.equal(copiedText(""), "");
 });
 
 test("danger dialogs", () => {
@@ -460,4 +471,21 @@ test("int: head guard — a branch switch after the dialog opened blocks reset",
   assert.equal(rev(d, "topic"), topicBefore, "nothing ran");
   git(d, "checkout", "-q", "--detach", "main");
   assert.match(checkGuards(d, p.guards), /detached HEAD/);
+});
+
+test("int: copyMessage argv prints the full multi-line message", async () => {
+  const { d, c } = await fx();
+  const msg = "multi subject\n\nfirst body line\n  indented line\n\nlast paragraph";
+  git(d, "commit", "--allow-empty", "-m", msg);
+  const h = rev(d, "HEAD");
+  const p = planFor("copyMessage", { kind: "commit", hash: h, parents: [], subject: "multi subject" }, {}, c);
+  assert.equal(copiedText(execFileSync("git", p.copyFrom, { cwd: d, env: { ...process.env, ...ISOLATED_ENV }, encoding: "utf8" })), msg);
+});
+
+test("int: copyStashMessage argv prints the stash message", async () => {
+  const { d, c } = await fx(false);
+  git(d, "stash", "push", "-u", "-m", "my stash note");
+  const h = rev(d, "stash@{0}");
+  const p = planFor("copyStashMessage", { kind: "stash", selector: "stash@{0}", hash: h }, {}, c);
+  assert.match(copiedText(execFileSync("git", p.copyFrom, { cwd: d, env: { ...process.env, ...ISOLATED_ENV }, encoding: "utf8" })), /my stash note$/);
 });
