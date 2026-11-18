@@ -698,7 +698,8 @@ export class Panel {
       .when(Boolean(bg), (e) => e.bg(bg))
       .hover((st) => st.bg(selected || current ? t.selected : match ? t.selection : t.hover))
       .child(paintRow(r, t, ROW_HEIGHT, this.graphW))
-      .child(h_flex().flex_1().min_w(0).gap(4).items_center()
+      // Chips are flex_none: in a narrow panel they are clipped here, not drawn over Author.
+      .child(h_flex().flex_1().min_w(0).gap(4).items_center().overflow_hidden()
         .children(chips.map((c) => this.chip(c, t, lane)))
         .child(div().flex_1().min_w(0).truncate().text_color(current ? t.accent : dim ? t.dim : t.foreground).child(subject || " ")))
       .when(cols.author, (e) => e.child(div().w(110).flex_none().pl(10).truncate().text_color(t.muted).child(author)))
