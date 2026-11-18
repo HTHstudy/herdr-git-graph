@@ -1,7 +1,7 @@
 node_modules
 *.png
 !preview.png
-mods/*/gpui-kit.d.ts
+mods/**/gpui-kit.d.ts
 mods/*/jsconfig.json
 mods/*/.git-graph-copy
 .superpowers/
