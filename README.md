@@ -34,6 +34,9 @@ VS Code Git Graph extension is used. `RECIPE.md` describes how to build it from 
 - **Expanding a commit scrolls it into view**: the row and its details come on screen,
   moving only as far as needed.
 - **Lane colors**: 12 colors from the theme's ansi palette, starting with blue.
+- **Fetch prunes**: the header Fetch runs `git fetch --all --prune`, so a remote branch
+  deleted on the server (a PR branch after merge) disappears from the graph. Local branches
+  are not touched.
 - **Branches dropdown** floats over the graph instead of pushing it down.
 
 ## Install (development)

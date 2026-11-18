@@ -441,7 +441,7 @@ export class Panel {
     }
   }
 
-  /** Header Fetch: git fetch --all, then every copy refreshes. */
+  /** Header Fetch: git fetch --all --prune, then every copy refreshes. */
   fetch(cx) {
     const d = this.data;
     if (!d || busyOf(d.root)) return;

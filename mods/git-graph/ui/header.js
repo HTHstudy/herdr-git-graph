@@ -16,13 +16,14 @@ export const HEADER_H = TITLE_H + CONTROLS_H + 1;
 export { busyOf };
 
 /**
- * Header Fetch: `git fetch --all` (no prune) through runPlan: busy lock, error toast,
- * then every copy refreshes.
+ * Header Fetch: `git fetch --all --prune` through runPlan: busy lock, error toast,
+ * then every copy refreshes. Prune drops remote branches deleted on the server (a PR's
+ * branch after merge); local branches are untouched.
  * @param {string} root
  * @param {string|null} on
  */
 export function fetchAll(root, on) {
-  return runPlan(root, on, "Fetch", { steps: [["fetch", "--all"]] });
+  return runPlan(root, on, "Fetch", { steps: [["fetch", "--all", "--prune"]] });
 }
 
 function button(id, t, { name, label, compact, disabled, active, onClick }) {
