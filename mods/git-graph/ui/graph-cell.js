@@ -2,10 +2,13 @@
 import { div, PathBuilder } from "gpui-kit";
 import { laneX } from "../lib/format.js";
 import { laneColorKey } from "../lib/lanes.js";
+import { saturate } from "../lib/color.js";
 
 const DOT = 4;
-/** A lane's color: its LANE_PALETTE theme key (blue first). */
-export const laneColor = (t, color) => t[laneColorKey(color)];
+/** How far lane colors move toward full saturation: theme ANSI colors are often pastel. */
+const LANE_SATURATE = 1;
+/** A lane's color: its LANE_PALETTE theme key (blue first), more saturated. */
+export const laneColor = (t, color) => saturate(t[laneColorKey(color)], LANE_SATURATE);
 
 function segment(x0, y0, x1, y1) {
   const p = PathBuilder.stroke(1.5).move_to(x0, y0);

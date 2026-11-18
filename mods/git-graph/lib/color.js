@@ -34,3 +34,24 @@ export function inkOn(fill, dark, light) {
   const ld = luminance(dark) ?? 0, ll = luminance(light) ?? 1;
   return ratio(f, ld) >= ratio(f, ll) ? dark : light;
 }
+
+const hex2 = (v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0");
+
+/**
+ * The same hue and lightness with more saturation: S moves `amount` of the way to full (0 keeps it,
+ * 1 makes it fully saturated). Grays stay gray; an unreadable color comes back unchanged.
+ * Returns "#rrggbb" (any alpha is dropped).
+ */
+export function saturate(hex, amount) {
+  const rgb = parseHex(hex);
+  if (!rgb) return hex;
+  const [r, g, b] = rgb.map((v) => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (d < 0.02) return "#" + rgb.map(hex2).join("");
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const s2 = Math.min(1, s + (1 - s) * amount);
+  const c = (1 - Math.abs(2 * l - 1)) * s2, x = c * (1 - Math.abs((h % 2) - 1)), m = l - c / 2;
+  const [r1, g1, b1] = h < 1 ? [c, x, 0] : h < 2 ? [x, c, 0] : h < 3 ? [0, c, x] : h < 4 ? [0, x, c] : h < 5 ? [x, 0, c] : [c, 0, x];
+  return "#" + [r1, g1, b1].map((v) => hex2((v + m) * 255)).join("");
+}
