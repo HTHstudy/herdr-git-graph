@@ -41,6 +41,7 @@ export class Panel {
     /** This copy's name for menus / dialogs it opens: their work comes back to it (`git-graph.request`). */
     this.uid = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     this.seenRequest = shared("git-graph.request")?.id ?? null;
+    this.seenFocus = shared("git-graph.focus")?.at ?? null;
     /** repoKey + hash → CommitDetail, oldest first (bounded). */
     this.details = new Map();
     this.itemCache = null; this.viewH = 0; this.copied = null;
@@ -763,6 +764,12 @@ export class Panel {
       if (this.data && changed.root === this.data.root) this.refresh(cx);
     }
     this.request(cx);
+    // The Graph key (`git-graph-tabs.graph`) just showed this panel: take the keyboard (within 2s).
+    const want = shared("git-graph.focus");
+    if (want && want.at !== this.seenFocus) {
+      this.seenFocus = want.at;
+      if (Date.now() - want.at < 2000) cx.spawn(async () => { this.handle.focus(); });
+    }
     // The list's own scrolling may swallow the wheel event that reached the end: whenever a
     // render sees the trailing row on screen, check again after this frame.
     this.autoMore(cx);

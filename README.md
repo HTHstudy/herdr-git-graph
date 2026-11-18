@@ -76,6 +76,12 @@ It is idempotent, refuses `main.json`, `terminals.json` and `win98.json`
 was before its first patch. The Graph button shows only on a layout whose
 `panel-body` has a `graph` block, so `git-graph-tabs` is harmless elsewhere.
 
+Keys: merge the repo's `keys.json` into `~/.config/herdr-app/keys.json`. `cmd-g` on macOS,
+`ctrl-shift-g` on Windows and Linux (`git-graph-tabs.graph`) opens the Graph panel and
+focuses it, or closes it, like the button. `cmd-f` / `ctrl-f` (`git-graph.find`) jumps to
+Find while the panel has focus (`/` also works). keys.json has no per-OS section, so the
+file carries both; `cmd` is the Windows key elsewhere, and `cmd-g` there is the system's.
+
 The repo's `mods/` folders are the source: edit there and re-run
 `scripts/link.sh`, never the copies in `~/.config/herdr-app/mods`.
 

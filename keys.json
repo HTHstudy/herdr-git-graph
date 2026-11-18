@@ -1,0 +1,4 @@
+{
+  "global": { "cmd-g": "git-graph-tabs.graph", "ctrl-shift-g": "git-graph-tabs.graph" },
+  "mod:git-graph": { "cmd-f": "git-graph.find", "ctrl-f": "git-graph.find" }
+}

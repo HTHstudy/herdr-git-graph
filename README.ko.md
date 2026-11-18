@@ -72,6 +72,12 @@ $HA do layout.switch '{"name":"main-graph"}'
 `panel-body`에 `graph` 블록이 있는 레이아웃에서만 보이므로, 다른 레이아웃에서는
 `git-graph-tabs`가 영향을 주지 않습니다.
 
+단축키: 저장소의 `keys.json`을 `~/.config/herdr-app/keys.json`에 합치세요. macOS는 `cmd-g`,
+Windows·Linux는 `ctrl-shift-g`(`git-graph-tabs.graph`)로 Graph 버튼처럼 패널을 열고 포커스를
+주거나, 열려 있으면 닫습니다. `cmd-f` / `ctrl-f`(`git-graph.find`)는 패널에 포커스가 있을 때
+Find로 이동합니다(`/`도 됩니다). keys.json에는 OS별 섹션이 없어서 두 키를 모두 담았습니다.
+다른 OS에서 `cmd`는 Windows 키이고, 그쪽의 `cmd-g`는 시스템이 가져갑니다.
+
 이 저장소의 `mods/` 폴더가 원본입니다. 여기서 수정하고 `scripts/link.sh`를 다시 실행하세요.
 `~/.config/herdr-app/mods`에 있는 복사본은 직접 고치지 마세요.
 
